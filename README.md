@@ -1,5 +1,7 @@
 # cswap-usage
 
+[한국어](README.ko.md)
+
 A [Paseo](https://paseo.sh) workspace panel that shows Claude usage for every
 [claude-swap](https://pypi.org/project/claude-swap/) account on one line each.
 
