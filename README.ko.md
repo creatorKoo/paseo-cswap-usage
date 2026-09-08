@@ -45,7 +45,7 @@ paseo plugin ls          # expect: cswap-usage  running
 계정 하나가 줄바꿈되는 한 줄이다:
 
 ```
-skt  you@example.com  [active]   $ ▮▮▯▯ 35% $22.50/$65.00   5h ▮▮▮▮ 100% 16m   7d ▮▯▯▯ 14% 21h 36m · est. 16%   Fable ▮▯▯▯ 19% 21h 36m
+skt  you@example.com  [active]   $ ▮▮▯▯ 35% $22.50/$65.00   5h ▮▮▮▮ 100% 16m   7d ▮▯▯▯ 14% 21h 36m · 예상 16%   Fable ▮▯▯▯ 19% 21h 36m
 ```
 
 - **별칭**, **이메일**, 그리고 claude-swap이 지금 쓰고 있는 계정에 붙는 `active` 배지
@@ -64,7 +64,7 @@ skt  you@example.com  [active]   $ ▮▮▯▯ 35% $22.50/$65.00   5h ▮▮▮
 출력에서 이 추정치를 빼 둔 이유이기도 하다. 창이 초기화되고 24시간쯤은 빈칸인데,
 claude-swap이 창이 어느 정도 지나기 전에는 `expectedPct`를 내주지 않기 때문이다.
 
-UI 문구는 시스템 로케일을 따른다(한국어 아니면 영어). 위 예시 줄은 영어 로케일 화면이다.
+UI 문구는 시스템 로케일을 따른다(한국어 아니면 영어). 스크린샷은 한국어 로케일 화면이다.
 
 계정 상태가 정상이 아니면 사용량 칩 자리에 claude-swap이 준 상태 문자열(`re-login needed`,
 `token expired`, `keychain unavailable` 등)이 warning 색으로 들어간다. 이 상태는 매번 다시

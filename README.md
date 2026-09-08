@@ -64,7 +64,8 @@ a rough signal — bursty usage skews it badly, which is why claude-swap leaves 
 out of its own human-facing output. It is blank for roughly the first 24 hours after a
 reset, because claude-swap does not publish `expectedPct` until the window has run a while.
 
-UI strings follow the system locale (Korean or English).
+UI strings follow the system locale (Korean or English). The screenshot shows the Korean
+locale; `예상` is `est.`
 
 If an account is not healthy, its usage chips are replaced by claude-swap's status string
 (`re-login needed`, `token expired`, `keychain unavailable`, and so on) in warning color.
