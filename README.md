@@ -42,17 +42,21 @@ Open it with **⌘K** (**Ctrl+K** on Windows and Linux) → **Open cswap usage**
 New tab menu under *plugin panels*. It is an ordinary workspace panel, so *Split down*
 works — park it under your agent as a status strip.
 
-Each account is one wrapping line:
+Accounts are the rows of a table. A row never wraps, and the same chip always sits in the
+same column:
 
 ```
-skt  you@example.com  [active]   $ ▮▮▯▯ 35% $22.50/$65.00   5h ▮▮▮▮ 100% 16m   7d ▮▯▯▯ 14% 21h 36m · est. 16%   Fable ▮▯▯▯ 19% 21h 36m
+skt   you@example.com [active]   5h    ▮▮▮▮ 100% 16m                  7d    ▮▯▯▯  14% 21h 36m · est. 16%   Fable ▮▯▯▯  19% 21h 36m              $     ▮▮▯▯  35% $22.50/$65.00
+alt   me@example.com             5h    ▮▯▯▯  22% 3h 41m               7d    ▮▯▯▯   6% 4d 02h                                                    $     ▯▯▯▯   4% $2.40/$65.00
+team  team@example.com           5h    ▮▮▯▯  48% 2h 05m               7d    ▮▮▯▯  51% 3d 11h · est. 74%    Fable ▮▮▮▯  63% 3d 11h
 ```
 
 - **alias**, **email**, and an `active` badge for the account claude-swap is currently on
-- a chip per window: `$` spend (only on accounts that have it), `5h`, `7d`, then each
-  scoped window such as `Fable`
-- every chip is `label · mini bar · percent · countdown`, and wrapping happens between
-  chips so a chip is never split across lines
+- a column per window: `5h`, `7d`, each scoped window such as `Fable`, then `$` spend last.
+  A column exists only if at least one account has that window.
+- every cell is `label · mini bar · percent · countdown`. Cells are fixed-width so the columns
+  line up, an account without a window leaves that cell blank, and the table scrolls
+  sideways when the pane is narrower than the table.
 - bar color goes accent → warning at 50% → danger at 90%
 - **A−** / **A+** in the footer cycle three text sizes (S/M/L). It starts at S every time
   the panel opens; plugins have no storage API.

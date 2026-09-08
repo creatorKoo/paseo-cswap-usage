@@ -79,9 +79,11 @@ const SIZE_SPECS: Record<SizeStep, { font: number; barWidth: number; padH: numbe
     L: { font: 14, barWidth: 56, padH: 12, padV: 8 },
   };
 
-/** One indivisible unit of the account line. Wrapping happens between chips, never inside one. */
+/** One cell of an account row. `column` is the table column the cell belongs to. */
 type Chip = {
   key: string;
+  /** Column key. Equal to `key`; every account puts this chip in the same column. */
+  column: string;
   label: string;
   pct: number;
   /** Countdown or spend amounts. Empty when the window has not opened yet. */
@@ -117,18 +119,10 @@ function projectionFor(window: UsageWindow): { text: string; warn: boolean } | n
 
 function chipsFor(usage: NonNullable<UsageAccount["usage"]>): Chip[] {
   const chips: Chip[] = [];
-  if (usage.spend !== undefined) {
-    chips.push({
-      key: "spend",
-      label: "$",
-      pct: usage.spend.pct,
-      detail: spendDetail(usage.spend),
-      projection: null,
-    });
-  }
   if (usage.fiveHour !== undefined) {
     chips.push({
       key: "fiveHour",
+      column: "fiveHour",
       label: "5h",
       pct: usage.fiveHour.pct,
       detail: usage.fiveHour.countdown ?? "",
@@ -138,22 +132,155 @@ function chipsFor(usage: NonNullable<UsageAccount["usage"]>): Chip[] {
   if (usage.sevenDay !== undefined) {
     chips.push({
       key: "sevenDay",
+      column: "sevenDay",
       label: "7d",
       pct: usage.sevenDay.pct,
       detail: usage.sevenDay.countdown ?? "",
       projection: projectionFor(usage.sevenDay),
     });
   }
+  // Keyed by name, not position, so the same scoped window lands in the same column on
+  // every account. A name repeated inside one account gets its index appended.
+  const seenScoped = new Set<string>();
   for (const [index, scoped] of (usage.scoped ?? []).entries()) {
+    const column = seenScoped.has(scoped.name)
+      ? `scoped:${scoped.name}#${index}`
+      : `scoped:${scoped.name}`;
+    seenScoped.add(scoped.name);
     chips.push({
-      key: `scoped-${index}-${scoped.name}`,
+      key: column,
+      column,
       label: scoped.name,
       pct: scoped.pct,
       detail: scoped.countdown ?? "",
       projection: projectionFor(scoped),
     });
   }
+  if (usage.spend !== undefined) {
+    chips.push({
+      key: "spend",
+      column: "spend",
+      label: "$",
+      pct: usage.spend.pct,
+      detail: spendDetail(usage.spend),
+      projection: null,
+    });
+  }
   return chips;
+}
+
+/** One table column, sized to the widest text any account actually puts in it. */
+type Column = {
+  key: string;
+  kind: "window" | "spend";
+  labelWidth: number;
+  detailWidth: number;
+  width: number;
+};
+
+const CHAR_EM = 0.6;
+
+// Wide (full-width) code point ranges: Hangul, kana, CJK ideographs, full-width forms.
+const WIDE_RANGES: [number, number][] = [
+  [0x1100, 0x115f],
+  [0x2e80, 0xa4cf],
+  [0xac00, 0xd7a3],
+  [0xf900, 0xfaff],
+  [0xfe30, 0xfe4f],
+  [0xff00, 0xff60],
+  [0xffe0, 0xffe6],
+];
+
+/**
+ * Rough advance width of a string. React Native offers no synchronous text measurement, so
+ * the table sizes itself from this estimate: full-width characters count as a full em,
+ * spaces as 0.3em, everything else as 0.6em, plus 0.6em of slack so a slightly wider glyph
+ * set does not clip the last character.
+ */
+function estimateWidth(text: string, font: number): number {
+  let em = 0;
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0;
+    if (char === " ") em += 0.3;
+    else if (WIDE_RANGES.some(([low, high]) => code >= low && code <= high)) em += 1;
+    else em += CHAR_EM;
+  }
+  return Math.round((em + 0.6) * font);
+}
+
+/**
+ * The columns the whole table needs: 5h, 7d, every scoped window in first-seen order, then
+ * spend last. A column exists only when at least one account has that chip, so accounts
+ * that lack it leave a blank cell rather than shifting the ones that follow. Each column is
+ * only as wide as its own widest label and detail, so a countdown-only column does not
+ * inherit the width of the one carrying "· est. 16%".
+ */
+function columnsFor(
+  accounts: UsageAccount[],
+  font: number,
+  barWidth: number,
+  pctWidth: number,
+  cellGap: number,
+): Column[] {
+  const measured = new Map<string, { labelWidth: number; detailWidth: number }>();
+  const scoped: string[] = [];
+  for (const account of accounts) {
+    // A degraded account shows its status string instead of cells, so its windows would
+    // only add columns that stay blank on every row.
+    if (account.usage === undefined || account.usageStatus !== "ok") continue;
+    for (const chip of chipsFor(account.usage)) {
+      const detail = chip.detail + projectionSuffix(chip);
+      const labelWidth = estimateWidth(chip.label, font);
+      const detailWidth = detail === "" ? 0 : estimateWidth(detail, font);
+      const seen = measured.get(chip.column);
+      if (seen === undefined) {
+        measured.set(chip.column, { labelWidth, detailWidth });
+        if (chip.column !== "fiveHour" && chip.column !== "sevenDay" && chip.column !== "spend") {
+          scoped.push(chip.column);
+        }
+      } else {
+        seen.labelWidth = Math.max(seen.labelWidth, labelWidth);
+        seen.detailWidth = Math.max(seen.detailWidth, detailWidth);
+      }
+    }
+  }
+  const columns: Column[] = [];
+  for (const key of ["fiveHour", "sevenDay", ...scoped, "spend"]) {
+    const seen = measured.get(key);
+    if (seen === undefined) continue;
+    // A column whose details are all empty drops the gap that would precede them.
+    const gaps = seen.detailWidth === 0 ? 2 : 3;
+    columns.push({
+      key,
+      kind: key === "spend" ? "spend" : "window",
+      labelWidth: seen.labelWidth,
+      detailWidth: seen.detailWidth,
+      width: seen.labelWidth + barWidth + pctWidth + seen.detailWidth + cellGap * gaps,
+    });
+  }
+  return columns;
+}
+
+/**
+ * Width of the alias/email/badge cell: the widest account, capped at 40 characters. Only an
+ * account that hits the cap gets its email ellipsized.
+ */
+function headerWidthFor(accounts: UsageAccount[], font: number): number {
+  const badge = Math.round(5 * CHAR_EM * font);
+  let width = 0;
+  for (const account of accounts) {
+    // The alias is a step larger and bold, which the 1.1 factor stands in for.
+    const alias = estimateWidth(account.alias ?? `#${account.number}`, font + 1) * 1.1;
+    const email = account.email === undefined ? 0 : estimateWidth(account.email, font);
+    width = Math.max(width, alias + email + (account.active ? badge : 0));
+  }
+  return Math.round(Math.min(width, 40 * CHAR_EM * font));
+}
+
+/** The projection as it is appended to the detail text. Empty when there is none. */
+function projectionSuffix(chip: Chip): string {
+  if (chip.projection === null) return "";
+  return chip.detail === "" ? chip.projection.text : ` · ${chip.projection.text}`;
 }
 
 function clockTime(iso: string | null): string {
@@ -174,31 +301,40 @@ function useStyles(theme: PluginThemeProp, step: SizeStep) {
   return useMemo(() => {
     const { font, barWidth, padH, padV } = SIZE_SPECS[step];
     const barHeight = Math.round(font / 2);
+    const cellGap = 4;
+    // The one width that does not depend on the data: percentages top out at "100%".
+    const pctWidth = estimateWidth("100%", font);
     return {
+      font,
       barWidth,
+      pctWidth,
+      cellGap,
       screen: { flex: 1, backgroundColor: theme.colors.surface0 },
       content: { paddingVertical: padV },
-      // No fixed widths anywhere below: every label sizes to its own content so nothing clips.
+      // Widths below come from columnsFor / headerWidthFor, measured over the accounts on
+      // screen: every cell of a column is the same width, so the same chip sits at the same
+      // x on every row. Rows never wrap; the table scrolls sideways instead.
+      table: { flexDirection: "column" as const, flexGrow: 1 },
       accountRow: {
         flexDirection: "row" as const,
-        flexWrap: "wrap" as const,
         alignItems: "center" as const,
-        gap: 10,
+        gap: 8,
         paddingHorizontal: padH,
         paddingVertical: padV,
       },
       accountDivider: { borderBottomWidth: 1, borderBottomColor: theme.colors.border },
-      chip: {
+      cell: {
         flexDirection: "row" as const,
         alignItems: "center" as const,
-        gap: 4,
+        gap: cellGap,
         flexShrink: 0 as const,
       },
+      cellEmpty: { flexShrink: 0 as const },
       headerChip: {
         flexDirection: "row" as const,
         alignItems: "center" as const,
         gap: 6,
-        flexShrink: 1 as const,
+        flexShrink: 0 as const,
       },
       alias: {
         color: theme.colors.foreground,
@@ -216,7 +352,12 @@ function useStyles(theme: PluginThemeProp, step: SizeStep) {
       },
       badgeText: { color: theme.colors.accentForeground, fontSize: font - 1 },
       label: { color: theme.colors.foregroundMuted, fontSize: font },
-      pct: { color: theme.colors.foreground, fontSize: font },
+      pct: {
+        color: theme.colors.foreground,
+        fontSize: font,
+        width: pctWidth,
+        textAlign: "right" as const,
+      },
       detail: { color: theme.colors.foregroundMuted, fontSize: font },
       projection: { color: theme.colors.foregroundMuted, fontSize: font },
       projectionWarn: { color: theme.colors.statusWarning, fontSize: font },
@@ -265,19 +406,38 @@ function barColor(theme: PluginThemeProp, pct: number): string {
   return theme.colors.statusDanger;
 }
 
-function UsageChip({ chip, styles, theme }: { chip: Chip; styles: Styles; theme: PluginThemeProp }) {
+function UsageChip({
+  chip,
+  column,
+  styles,
+  theme,
+}: {
+  chip: Chip;
+  column: Column;
+  styles: Styles;
+  theme: PluginThemeProp;
+}) {
   const width = `${Math.max(0, Math.min(chip.pct, 100))}%` as const;
   return (
-    <View style={styles.chip}>
-      <Text style={styles.label}>{chip.label}</Text>
+    <View style={[styles.cell, { width: column.width }]}>
+      <Text style={[styles.label, { width: column.labelWidth }]} numberOfLines={1}>
+        {chip.label}
+      </Text>
       <View style={styles.track}>
         <View style={{ width, height: "100%", backgroundColor: barColor(theme, chip.pct) }} />
       </View>
-      <Text style={styles.pct}>{`${Math.round(chip.pct)}%`}</Text>
-      {chip.detail === "" ? null : <Text style={styles.detail}>{chip.detail}</Text>}
-      {chip.projection === null ? null : (
-        <Text style={chip.projection.warn ? styles.projectionWarn : styles.projection}>
-          {chip.detail === "" ? chip.projection.text : `· ${chip.projection.text}`}
+      <Text style={styles.pct} numberOfLines={1}>{`${Math.round(chip.pct)}%`}</Text>
+      {/* Detail and projection share one cell, so they are one Text with a nested span that
+          keeps the warning color. A column with no details at all drops the Text entirely,
+          which is the gap columnsFor leaves out of the width. */}
+      {column.detailWidth === 0 ? null : (
+        <Text style={[styles.detail, { width: column.detailWidth }]} numberOfLines={1}>
+          {chip.detail}
+          {chip.projection === null ? null : (
+            <Text style={chip.projection.warn ? styles.projectionWarn : styles.projection}>
+              {projectionSuffix(chip)}
+            </Text>
+          )}
         </Text>
       )}
     </View>
@@ -286,11 +446,15 @@ function UsageChip({ chip, styles, theme }: { chip: Chip; styles: Styles; theme:
 
 function AccountLine({
   account,
+  columns,
+  headerWidth,
   styles,
   theme,
   divider,
 }: {
   account: UsageAccount;
+  columns: Column[];
+  headerWidth: number;
   styles: Styles;
   theme: PluginThemeProp;
   divider: boolean;
@@ -301,11 +465,14 @@ function AccountLine({
   // visible. An "ok" account with no usage block is merely empty, not broken.
   const degraded = account.usageStatus !== "ok";
   const chips = usage === undefined ? [] : chipsFor(usage);
+  const byColumn = new Map(chips.map((chip) => [chip.column, chip]));
   return (
     <View style={divider ? [styles.accountRow, styles.accountDivider] : styles.accountRow}>
-      <View style={styles.headerChip}>
+      <View style={[styles.headerChip, { width: headerWidth }]}>
         <Text style={styles.alias}>{account.alias ?? `#${account.number}`}</Text>
-        <Text style={styles.email}>{account.email ?? ""}</Text>
+        <Text style={styles.email} numberOfLines={1}>
+          {account.email ?? ""}
+        </Text>
         {account.active ? (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>active</Text>
@@ -317,9 +484,22 @@ function AccountLine({
       ) : chips.length === 0 ? (
         <Text style={styles.muted}>{strings.noUsage}</Text>
       ) : (
-        chips.map((chip) => (
-          <UsageChip key={chip.key} chip={chip} styles={styles} theme={theme} />
-        ))
+        columns.map((column) => {
+          const chip = byColumn.get(column.key);
+          // A column this account does not have still takes its width, so the next cell
+          // stays under the same column on every other row.
+          return chip === undefined ? (
+            <View key={column.key} style={[styles.cellEmpty, { width: column.width }]} />
+          ) : (
+            <UsageChip
+              key={column.key}
+              chip={chip}
+              column={column}
+              styles={styles}
+              theme={theme}
+            />
+          );
+        })
       )}
     </View>
   );
@@ -367,6 +547,11 @@ export function UsagePanel({ theme }: PluginWorkspacePanelProps) {
   });
 
   const accounts = usage.data?.accounts ?? [];
+  const columns = useMemo(
+    () => columnsFor(accounts, styles.font, styles.barWidth, styles.pctWidth, styles.cellGap),
+    [accounts, styles],
+  );
+  const headerWidth = useMemo(() => headerWidthFor(accounts, styles.font), [accounts, styles]);
   // A transport failure (plugin subprocess crash, closed session) never reaches the daemon
   // handler, so `data.error` stays null and only the query knows. It is also the most recent
   // failure, so it wins over a stale handler-side message.
@@ -389,15 +574,21 @@ export function UsagePanel({ theme }: PluginWorkspacePanelProps) {
             </Text>
           </View>
         ) : (
-          accounts.map((account, index) => (
-            <AccountLine
-              key={account.number}
-              account={account}
-              styles={styles}
-              theme={theme}
-              divider={index < accounts.length - 1}
-            />
-          ))
+          <ScrollView horizontal contentContainerStyle={{ flexGrow: 1 }}>
+            <View style={styles.table}>
+              {accounts.map((account, index) => (
+                <AccountLine
+                  key={account.number}
+                  account={account}
+                  columns={columns}
+                  headerWidth={headerWidth}
+                  styles={styles}
+                  theme={theme}
+                  divider={index < accounts.length - 1}
+                />
+              ))}
+            </View>
+          </ScrollView>
         )}
       </ScrollView>
       <View style={styles.footer}>
