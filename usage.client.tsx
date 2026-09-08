@@ -103,7 +103,7 @@ function spendDetail(spend: UsageSpend): string {
  * cswap's `expectedPct` is how far the window has elapsed, not a usage forecast, so
  * `pct / expectedPct` extrapolates the current burn rate to the full window. This is a
  * rough estimate — bursty usage skews it badly, which is why cswap omits it from its own
- * human-facing output. Shown here at the user's explicit request (PLAN.md 8.3).
+ * human-facing output, and why README.md calls it a rough signal.
  */
 function projectionFor(window: UsageWindow): { text: string; warn: boolean } | null {
   const expected = window.expectedPct;

@@ -17,7 +17,7 @@ function cswapBin(): string {
   return process.env.CSWAP_BIN ?? path.join(homedir(), ".local", "bin", "cswap");
 }
 // cswap shares a ~28-30 request/hour budget per identity across every surface, so we
-// never poll faster than this. See PLAN.md 2.2.
+// never poll faster than this. See "How it works" in README.md.
 const CACHE_TTL_MS = 60_000;
 // Daemon RPCs are cut off at 30s; fail first so the caller sees our message, not a timeout.
 const EXEC_TIMEOUT_MS = 25_000;

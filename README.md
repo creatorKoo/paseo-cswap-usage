@@ -99,13 +99,20 @@ override it:
 CSWAP_BIN=/opt/homebrew/bin/cswap
 ```
 
+It has to be set in the environment of the **Paseo daemon process**, which is where the
+handler runs. Exporting it in your shell does nothing for an already-running daemon — set
+it where the daemon is started (on macOS, `launchctl setenv CSWAP_BIN <path>` before
+relaunching the Paseo app, or in the shell that launches the daemon).
+
 ## Uninstall
 
 ```bash
 paseo plugin remove cswap-usage
 ```
 
-That removes the configuration only; it never deletes the source directory.
+`remove` deletes the plugin's configuration. It never deletes a directory source, so a
+local checkout you installed with `paseo plugin install` stays where it is. For a Git
+source installed with `paseo plugin add`, it also deletes the managed checkout.
 
 ## Development notes
 
