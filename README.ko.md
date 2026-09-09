@@ -68,10 +68,16 @@ claude-swap이 창이 어느 정도 지나기 전에는 `expectedPct`를 내주�
 
 UI 문구는 시스템 로케일을 따른다(한국어 아니면 영어). 스크린샷은 한국어 로케일 화면이다.
 
-계정 상태가 정상이 아니면 사용량 칩 자리에 claude-swap이 준 상태 문자열(`re-login needed`,
-`token expired`, `keychain unavailable` 등)이 warning 색으로 들어간다. 이 상태는 매번 다시
-계산할 뿐 디스크에는 쓰지 않는다. 이 플러그인이 claude-swap의 캐시 파일을 읽는 대신 굳이
-프로세스를 띄우는 이유가 바로 이것이다.
+계정 상태가 정상이 아니면 claude-swap이 준 상태(`token_expired`, `relogin_required`,
+`keychain_unavailable` 등)를 warning 색으로 보여준다. claude-swap이 그 계정의 마지막 정상
+값을 갖고 있으면 칩은 그 값으로 흐리게 그리고, 상태는 별칭 옆 배지로 붙이며,
+`마지막 값 HH:MM:SS`로 그 값의 시각을 표시한다. 마지막 값이 없으면 칩 자리에 상태 문자열만
+들어간다. 이 상태는 매번 다시 계산할 뿐 디스크에는 쓰지 않는다. 이 플러그인이 claude-swap의
+캐시 파일을 읽는 대신 굳이 프로세스를 띄우는 이유가 바로 이것이다.
+
+`token_expired`는 대개 일시적이다. 그 계정으로 `cswap run` 세션이 살아 있으면 claude-swap은
+세션을 로그아웃시키지 않으려고 토큰을 건드리지 않는다. 돌고 있는 Claude가 다음 API 호출 때
+스스로 갱신하므로, 유휴 세션이면 이 상태가 한동안 유지될 수 있다.
 
 ## 동작 방식
 

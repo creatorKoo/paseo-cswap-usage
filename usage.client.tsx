@@ -2,7 +2,13 @@ import { type PluginWorkspacePanelProps, useRpc } from "@getpaseo/plugin";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { listUsage, type UsageAccount, type UsageSpend, type UsageWindow } from "./contract";
+import {
+  listUsage,
+  type UsageAccount,
+  type UsageBlock,
+  type UsageSpend,
+  type UsageWindow,
+} from "./contract";
 
 const POLL_INTERVAL_MS = 60_000;
 
@@ -12,6 +18,7 @@ type StringTable = {
   loading: string;
   noAccounts: string;
   noUsage: string;
+  lastGood: (time: string) => string;
   estimate: (pct: number) => string;
   exhaust: string;
   updated: (time: string) => string;
@@ -28,6 +35,7 @@ const STRINGS: Record<Locale, StringTable> = {
     loading: "불러오는 중…",
     noAccounts: "계정이 없습니다",
     noUsage: "사용량 없음",
+    lastGood: (time) => `마지막 값 ${time}`,
     estimate: (pct) => `예상 ${pct}%`,
     exhaust: "소진 예상",
     updated: (time) => `갱신 ${time} · 60초마다`,
@@ -42,6 +50,7 @@ const STRINGS: Record<Locale, StringTable> = {
     loading: "Loading…",
     noAccounts: "No accounts",
     noUsage: "no usage",
+    lastGood: (time) => `last value ${time}`,
     estimate: (pct) => `est. ${pct}%`,
     exhaust: "will run out",
     updated: (time) => `updated ${time} · every 60s`,
@@ -225,10 +234,11 @@ function columnsFor(
   const measured = new Map<string, { labelWidth: number; detailWidth: number }>();
   const scoped: string[] = [];
   for (const account of accounts) {
-    // A degraded account shows its status string instead of cells, so its windows would
-    // only add columns that stay blank on every row.
-    if (account.usage === undefined || account.usageStatus !== "ok") continue;
-    for (const chip of chipsFor(account.usage)) {
+    // A degraded account with no last-good block shows its status string instead of cells,
+    // so its windows would only add columns that stay blank on every row.
+    const shown = shownUsage(account);
+    if (shown === null) continue;
+    for (const chip of chipsFor(shown.usage)) {
       const detail = chip.detail + projectionSuffix(chip);
       const labelWidth = estimateWidth(chip.label, font);
       const detailWidth = detail === "" ? 0 : estimateWidth(detail, font);
@@ -272,7 +282,13 @@ function headerWidthFor(accounts: UsageAccount[], font: number): number {
     // The alias is a step larger and bold, which the 1.1 factor stands in for.
     const alias = estimateWidth(account.alias ?? `#${account.number}`, font + 1) * 1.1;
     const email = account.email === undefined ? 0 : estimateWidth(account.email, font);
-    width = Math.max(width, alias + email + (account.active ? badge : 0));
+    // A degraded account that still draws last-good cells carries its status as a badge
+    // beside `active`, plus the padding the badge style adds.
+    const status =
+      shownUsage(account)?.stale === true
+        ? estimateWidth(account.usageStatus, font - 1) + 10
+        : 0;
+    width = Math.max(width, alias + email + (account.active ? badge : 0) + status);
   }
   return Math.round(Math.min(width, 40 * CHAR_EM * font));
 }
@@ -293,6 +309,21 @@ function clockTime(iso: string | null): string {
     second: "2-digit",
     hour12: false,
   });
+}
+
+/**
+ * The usage block a row draws. Live `usage` when the fetch succeeded; otherwise the
+ * `lastGoodUsage` cswap carries for an account it could not refresh this pass (for example
+ * `token_expired` while a live `cswap run` session owns the credential — cswap leaves that
+ * token alone so it does not log the session out). `stale` marks the fallback so the row can
+ * dim it and show the status badge. Null when there is nothing to draw at all.
+ */
+function shownUsage(account: UsageAccount): { usage: UsageBlock; stale: boolean } | null {
+  if (account.usageStatus === "ok") {
+    return account.usage == null ? null : { usage: account.usage, stale: false };
+  }
+  if (account.lastGoodUsage !== undefined) return { usage: account.lastGoodUsage, stale: true };
+  return null;
 }
 
 type Styles = ReturnType<typeof useStyles>;
@@ -351,6 +382,17 @@ function useStyles(theme: PluginThemeProp, step: SizeStep) {
         flexShrink: 0 as const,
       },
       badgeText: { color: theme.colors.accentForeground, fontSize: font - 1 },
+      statusBadge: {
+        borderColor: theme.colors.statusWarning,
+        borderWidth: 1,
+        borderRadius: 4,
+        paddingHorizontal: 4,
+        paddingVertical: 0,
+        flexShrink: 0 as const,
+      },
+      statusBadgeText: { color: theme.colors.statusWarning, fontSize: font - 1 },
+      // Last-good cells are drawn dimmed so a frozen value is never mistaken for a live one.
+      staleCells: { flexDirection: "row" as const, alignItems: "center" as const, opacity: 0.55 },
       label: { color: theme.colors.foregroundMuted, fontSize: font },
       pct: {
         color: theme.colors.foreground,
@@ -459,13 +501,24 @@ function AccountLine({
   theme: PluginThemeProp;
   divider: boolean;
 }) {
-  const usage = account.usage;
+  const shown = shownUsage(account);
   // A non-ok status is recomputed on every cswap pass and is never persisted, so it is the
   // whole reason this plugin shells out instead of reading cswap's cache file. It must stay
-  // visible. An "ok" account with no usage block is merely empty, not broken.
+  // visible: as a badge when last-good cells are drawn, as the whole row otherwise. An "ok"
+  // account with no usage block is merely empty, not broken.
   const degraded = account.usageStatus !== "ok";
-  const chips = usage === undefined ? [] : chipsFor(usage);
+  const chips = shown === null ? [] : chipsFor(shown.usage);
   const byColumn = new Map(chips.map((chip) => [chip.column, chip]));
+  const cells = columns.map((column) => {
+    const chip = byColumn.get(column.key);
+    // A column this account does not have still takes its width, so the next cell
+    // stays under the same column on every other row.
+    return chip === undefined ? (
+      <View key={column.key} style={[styles.cellEmpty, { width: column.width }]} />
+    ) : (
+      <UsageChip key={column.key} chip={chip} column={column} styles={styles} theme={theme} />
+    );
+  });
   return (
     <View style={divider ? [styles.accountRow, styles.accountDivider] : styles.accountRow}>
       <View style={[styles.headerChip, { width: headerWidth }]}>
@@ -478,28 +531,27 @@ function AccountLine({
             <Text style={styles.badgeText}>active</Text>
           </View>
         ) : null}
+        {shown?.stale === true ? (
+          <View style={styles.statusBadge}>
+            <Text style={styles.statusBadgeText}>{account.usageStatus}</Text>
+          </View>
+        ) : null}
       </View>
-      {degraded ? (
-        <Text style={styles.status}>{account.usageStatus}</Text>
-      ) : chips.length === 0 ? (
-        <Text style={styles.muted}>{strings.noUsage}</Text>
+      {shown === null ? (
+        degraded ? (
+          <Text style={styles.status}>{account.usageStatus}</Text>
+        ) : (
+          <Text style={styles.muted}>{strings.noUsage}</Text>
+        )
+      ) : shown.stale ? (
+        <>
+          <View style={styles.staleCells}>{cells}</View>
+          <Text style={styles.muted} numberOfLines={1}>
+            {strings.lastGood(clockTime(account.lastGoodFetchedAt ?? null))}
+          </Text>
+        </>
       ) : (
-        columns.map((column) => {
-          const chip = byColumn.get(column.key);
-          // A column this account does not have still takes its width, so the next cell
-          // stays under the same column on every other row.
-          return chip === undefined ? (
-            <View key={column.key} style={[styles.cellEmpty, { width: column.width }]} />
-          ) : (
-            <UsageChip
-              key={column.key}
-              chip={chip}
-              column={column}
-              styles={styles}
-              theme={theme}
-            />
-          );
-        })
+        cells
       )}
     </View>
   );

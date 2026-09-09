@@ -109,13 +109,27 @@ function parseSnapshot(stdout: string): UsageSnapshot {
   if (envelope.data.schemaVersion !== 1) {
     throw new CswapPayloadError(`unexpected schemaVersion ${envelope.data.schemaVersion}`);
   }
-  const accounts = z.array(AccountSchema).safeParse(envelope.data.accounts);
-  if (!accounts.success) {
-    throw new CswapPayloadError(`unexpected cswap account: ${describeZodError(accounts.error)}`);
+  // Accounts are validated one at a time so a single malformed entry drops only itself.
+  // Before this, one unexpected field shape froze the whole panel at the last good poll.
+  const accounts: UsageAccount[] = [];
+  let firstIssue: string | null = null;
+  envelope.data.accounts.forEach((raw, index) => {
+    const account = AccountSchema.safeParse(raw);
+    if (account.success) {
+      accounts.push(account.data);
+      return;
+    }
+    const issue = `${index}.${describeZodError(account.error)}`;
+    firstIssue ??= issue;
+    // Path + zod code only — never the payload, which carries emails.
+    console.error(`[cswap-usage] skipped cswap account ${issue}`);
+  });
+  if (accounts.length === 0 && firstIssue !== null) {
+    throw new CswapPayloadError(`unexpected cswap account: ${firstIssue}`);
   }
   return {
     activeAccountNumber: envelope.data.activeAccountNumber ?? null,
-    accounts: accounts.data,
+    accounts,
   };
 }
 

@@ -25,23 +25,31 @@ const SpendSchema = z.object({
   currency: z.string(),
 });
 
-// `organizationName` / `organizationUuid` / `isOrganization` / `usageAgeSeconds` are
-// intentionally omitted: the panel never renders them, so they never leave the daemon.
+// One usage block: either the live `usage` or the `lastGoodUsage` cswap keeps for an
+// account whose current fetch could not run.
+const UsageBlockSchema = z.object({
+  fiveHour: WindowSchema.optional(),
+  sevenDay: WindowSchema.optional(),
+  spend: SpendSchema.optional(),
+  scoped: z.array(ScopedSchema).optional(),
+});
+
+// `organizationName` / `organizationUuid` / `isOrganization` / `usageAgeSeconds` /
+// `lastGoodAgeSeconds` are intentionally omitted: the panel never renders them (age is
+// derived client-side), so they never leave the daemon.
 export const AccountSchema = z.object({
   number: z.number(),
   alias: z.string().optional(),
   email: z.string().optional(),
   active: z.boolean(),
   usageStatus: z.string(),
-  usage: z
-    .object({
-      fiveHour: WindowSchema.optional(),
-      sevenDay: WindowSchema.optional(),
-      spend: SpendSchema.optional(),
-      scoped: z.array(ScopedSchema).optional(),
-    })
-    .optional(),
+  // `null` (not just absent) whenever `usageStatus` is not "ok" — e.g. `token_expired`
+  // while a live `cswap run` session owns the credential and cswap defers the refresh.
+  usage: UsageBlockSchema.nullable().optional(),
   usageFetchedAt: z.string().optional(),
+  /** The most recent successful fetch, kept by cswap while `usage` is null. */
+  lastGoodUsage: UsageBlockSchema.optional(),
+  lastGoodFetchedAt: z.string().optional(),
 });
 
 export const listUsage = defineRpc({
@@ -60,5 +68,6 @@ export const listUsage = defineRpc({
 export type UsageWindow = z.output<typeof WindowSchema>;
 export type UsageScoped = z.output<typeof ScopedSchema>;
 export type UsageSpend = z.output<typeof SpendSchema>;
+export type UsageBlock = z.output<typeof UsageBlockSchema>;
 export type UsageAccount = z.output<typeof AccountSchema>;
 export type UsageListOutput = z.input<typeof listUsage.output>;

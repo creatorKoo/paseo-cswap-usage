@@ -71,10 +71,18 @@ reset, because claude-swap does not publish `expectedPct` until the window has r
 UI strings follow the system locale (Korean or English). The screenshot shows the Korean
 locale; `예상` is `est.`
 
-If an account is not healthy, its usage chips are replaced by claude-swap's status string
-(`re-login needed`, `token expired`, `keychain unavailable`, and so on) in warning color.
-That state is recomputed on every pass and never written to disk, which is the whole reason
-this plugin shells out instead of reading claude-swap's cache file.
+If an account is not healthy, its status (`token_expired`, `relogin_required`,
+`keychain_unavailable`, and so on) is shown in warning color. When claude-swap still has a
+last successful reading for that account, the chips are drawn dimmed from that reading, the
+status becomes a badge beside the alias, and `last value HH:MM:SS` gives the time of that
+reading. Without a last reading, the status string replaces the chips. That state is
+recomputed on every pass and never written to disk, which is the whole reason this plugin
+shells out instead of reading claude-swap's cache file.
+
+`token_expired` is usually transient: it appears while a live `cswap run` session holds the
+account's credential, because claude-swap leaves that token alone rather than log the session
+out. The running Claude refreshes it on its next API call, so an idle session can sit in this
+state for a while.
 
 ## How it works
 
