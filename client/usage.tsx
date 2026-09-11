@@ -1,4 +1,4 @@
-import { type PluginWorkspacePanelProps, useRpc } from "@getpaseo/plugin";
+import { type PluginWorkspacePanelProps, useRpc } from "@getpaseo/plugin/client";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
@@ -8,7 +8,7 @@ import {
   type UsageBlock,
   type UsageSpend,
   type UsageWindow,
-} from "./contract";
+} from "../shared/contract";
 
 const POLL_INTERVAL_MS = 60_000;
 
@@ -116,13 +116,13 @@ function spendDetail(spend: UsageSpend): string {
  * rough estimate — bursty usage skews it badly, which is why cswap omits it from its own
  * human-facing output, and why README.md calls it a rough signal.
  */
-function projectionFor(window: UsageWindow): { text: string; warn: boolean } | null {
-  const expected = window.expectedPct;
+function projectionFor(usageWindow: UsageWindow): { text: string; warn: boolean } | null {
+  const expected = usageWindow.expectedPct;
   if (expected === undefined || expected <= 0) return null;
-  const projected = (window.pct / expected) * 100;
+  const projected = (usageWindow.pct / expected) * 100;
   if (projected < 100) return { text: strings.estimate(Math.round(projected)), warn: false };
   // Already at the ceiling: an exhaustion warning would just restate the bar.
-  if (window.pct >= 100) return null;
+  if (usageWindow.pct >= 100) return null;
   return { text: strings.exhaust, warn: true };
 }
 

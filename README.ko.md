@@ -18,7 +18,7 @@ Claude 계정 여러 개를 돌려 쓰고 있다면 이들을 한눈에 볼 방�
 
 ## 요구 사항
 
-- Paseo 0.7.2 이상
+- Paseo 0.8.0 이상
 - 대상 데몬에서 플러그인 활성화(**Settings → Plugins → Enable plugins**)
 - [`claude-swap`](https://pypi.org/project/claude-swap/) 설치, `cswap list --json` 이 정상 동작
 
@@ -85,7 +85,7 @@ UI 문구는 시스템 로케일을 따른다(한국어 아니면 영어). 스�
 API를 직접 부르지도 않으며, 상태를 바꾸는 claude-swap 명령(`switch`, `auto`)도 실행하지 않는다.
 철저히 읽기 전용이다.
 
-데몬 쪽 핸들러는
+데몬이 띄운 플러그인 서브프로세스에서 도는 서버 쪽 핸들러는
 
 - **60초** 캐시를 두고 그보다 자주 조회하지 않는다. 사용량 엔드포인트 예산이 아이덴티티당
   시간당 28~30회쯤이고, claude-swap을 쓰는 모든 화면이 이 예산을 나눠 쓴다. 조회가 실제로
@@ -97,7 +97,7 @@ API를 직접 부르지도 않으며, 상태를 바꾸는 claude-swap 명령(`sw
 - 서브프로세스 stdout은 절대 로그에 남기지 않는다. 이메일과 조직 이름이 들어 있다.
 
 패널이 그리지 않는 필드(`organizationName`, `organizationUuid`, `projectedExhaustionAt` 등)는
-데몬 쪽 Zod 스키마에서 걸러내므로 클라이언트까지 아예 넘어가지 않는다.
+서버 쪽 Zod 스키마에서 걸러내므로 클라이언트까지 아예 넘어가지 않는다.
 
 ## 설정
 
@@ -126,17 +126,31 @@ paseo plugin remove cswap-usage
 
 ## 개발 메모
 
-Paseo 0.7.2 플러그인 컴파일러에서 놓치기 쉬운 것들:
+```text
+index.client.tsx    앱 번들 진입점: 패널과 커맨드 센터 등록
+index.server.ts     데몬 번들 진입점: RPC 핸들러
+client/usage.tsx    패널 본체
+server/cswap.ts     cswap 실행·캐시·파싱
+shared/contract.ts  Zod RPC 계약, 양쪽 번들에 모두 들어간다
+```
 
-- 진입점은 `index.ts` 하나다. Paseo는 **같은 진입점에서 클라이언트 번들과 서버 번들을 따로**
-  만든 뒤 클라이언트에서는 `plugin.handle(...)`을, 서버에서는 UI 등록을 떼어낸다. 단, 이것들이
-  contribute 본문에 맨몸 문장으로 놓여 있을 때만 그렇다.
-- Node 임포트에는 `node:` 접두사를 붙여야 한다. 클라이언트 번들은 `/^node:/`를 `{}`로 스텁
-  처리하는데, 접두사 없는 `"child_process"`는 스텁 대상이 아니라 모듈 해석에 실패한다.
-- 스텁이 빈 객체이므로 **모듈 최상위에서 Node API를 부르면 안 된다.** 패널이 로드되다 터진다.
-  `homedir()`과 `promisify()`는 핸들러 안에서 부른다.
-- `*.client.tsx`와 `*.server.ts`는 반대쪽 번들에서 빠진다. `contract.ts`처럼 접미사 없는
-  모듈은 양쪽에 다 들어가니 Node 코드와 React Native 코드를 섞지 않는다.
+Paseo 0.8 플러그인 컴파일러에서 놓치기 쉬운 것들:
+
+- 진입점이 **둘**이다. `index.client.tsx`와 `index.server.ts`가 각각 `contribute()`를 기본
+  내보내기로 갖는다. 최소 하나는 있어야 하고, 이 플러그인은 둘 다 쓴다.
+- **디렉터리가 곧 컴파일 경계다.** `client/`는 앱 번들에만, `server/`는 데몬 번들에만,
+  `shared/`는 양쪽에 들어간다. 0.8에서 `*.client.tsx` 같은 파일명 접미사는 아무 의미가 없고,
+  리포 루트에 남은 그 밖의 코드 모듈은 컴파일 에러다.
+- 클라이언트에서 `server/`를 임포트하거나, 서버에서 `client/`를 임포트하거나, 클라이언트에서
+  닿는 `node:` 임포트는 전부 **컴파일 에러**다. 0.7처럼 빈 객체로 스텁 처리되지 않는다.
+  그래서 `server/`는 그냥 Node 번들이고, 모듈 최상위에서 `promisify()`나 `homedir()`을 불러도
+  된다.
+- `shared/`에는 Zod 계약과 평범한 값만 둔다. 앱 번들에도 들어가므로 Node 코드와 React Native
+  코드를 섞지 않는다.
+- 임포트 경로가 런타임별로 갈린다. `defineRpc`는 `@getpaseo/plugin`, 훅과 클라이언트 기여
+  타입은 `@getpaseo/plugin/client`, `PluginServerContext`는 `@getpaseo/plugin/server`.
+- `paseo-plugin.json`에 `requirements.paseo`를 반드시 적는다. 이 필드가 없는 매니페스트는
+  `<0.8.0`으로 읽혀서 Paseo 0.8이 플러그인 로드를 거부한다.
 - 모든 `Text`에는 `theme.colors`의 색을 지정해야 한다. 스타일 없는 텍스트는 검은색이라
   다크 테마에서는 보이지 않는다.
 

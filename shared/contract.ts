@@ -1,6 +1,6 @@
-// Shared RPC contract. No runtime suffix: this module is bundled into both the
-// client and the server target, so it must stay free of Node and React Native code.
-import { defineRpc } from "@getpaseo/plugin/server";
+// Shared RPC contract. Everything under shared/ is bundled into both the client and
+// the server target, so it must stay free of Node and React Native code.
+import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 
 // Every window field except `pct` is optional: cswap omits `resetsAt` / `countdown` /

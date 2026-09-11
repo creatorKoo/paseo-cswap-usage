@@ -18,7 +18,7 @@ This panel fills that gap until Paseo inherits usage for extended providers.
 
 ## Requirements
 
-- Paseo 0.7.2 or newer
+- Paseo 0.8.0 or newer
 - Plugins enabled on the target daemon (**Settings → Plugins → Enable plugins**)
 - [`claude-swap`](https://pypi.org/project/claude-swap/) installed, with `cswap list --json` working
 
@@ -90,7 +90,7 @@ state for a while.
 files, never calls the Anthropic API directly, and never runs a claude-swap command that
 changes state — no `switch`, no `auto`. It is strictly read-only.
 
-The daemon-side handler:
+The server-side handler, which runs in the plugin subprocess the daemon starts:
 
 - caches for **60 seconds** and polls no faster, because the usage endpoint has a budget of
   roughly 28–30 requests per hour per identity, shared across every claude-swap surface.
@@ -101,7 +101,7 @@ The daemon-side handler:
 - never logs the subprocess stdout, which carries emails and organization names.
 
 Fields the panel does not render (`organizationName`, `organizationUuid`,
-`projectedExhaustionAt`, …) are dropped by the Zod schema on the daemon side, so they never
+`projectedExhaustionAt`, …) are dropped by the Zod schema on the server side, so they never
 reach the client at all.
 
 ## Configuration
@@ -131,17 +131,33 @@ source installed with `paseo plugin add`, it also deletes the managed checkout.
 
 ## Development notes
 
-Notes on the Paseo 0.7.2 plugin compiler that are easy to get wrong:
+```text
+index.client.tsx    app bundle: panel and Command Center registrations
+index.server.ts     daemon bundle: the RPC handler
+client/usage.tsx    the panel itself
+server/cswap.ts     spawning cswap, caching, parsing
+shared/contract.ts  the Zod RPC contract, compiled into both bundles
+```
 
-- The entry point is `index.ts`. Paseo builds a **client and a server bundle from the same
-  entry**, then strips `plugin.handle(...)` from the client and the UI registrations from
-  the server — but only when they are bare statements in the contribute body.
-- Node imports must use the `node:` prefix. The client bundle stubs `/^node:/` to `{}`;
-  bare `"child_process"` is not stubbed and fails to resolve.
-- Because those stubs are empty objects, **never call a Node API at module scope** — the
-  panel would throw on load. `homedir()` and `promisify()` are called inside the handler.
-- `*.client.tsx` and `*.server.ts` are pruned from the opposite bundle; unsuffixed modules
-  such as `contract.ts` go into both, so keep them free of Node and React Native code.
+Notes on the Paseo 0.8 plugin compiler that are easy to get wrong:
+
+- There are **two entry points**, `index.client.tsx` and `index.server.ts`, each with its
+  own `contribute()` default export. A plugin needs at least one; this one has both.
+- **Directories are the compiler boundary.** `client/` compiles into the app bundle only,
+  `server/` into the daemon bundle only, `shared/` into both. Filename suffixes such as
+  `*.client.tsx` mean nothing in 0.8, and any other code module left in the repository root
+  is a compile error.
+- A client import that reaches `server/`, a server import that reaches `client/`, and any
+  `node:` import reachable from client code are all **compile errors** — not empty stubs, as
+  in 0.7. So `server/` is a plain Node bundle: module-scope `promisify()` and `homedir()`
+  are fine there.
+- `shared/` carries Zod contracts and plain values only. It lands in the app bundle too, so
+  it must stay free of Node and React Native code.
+- Imports are split by runtime: `defineRpc` from `@getpaseo/plugin`, hooks and client
+  contribution types from `@getpaseo/plugin/client`, `PluginServerContext` from
+  `@getpaseo/plugin/server`.
+- `paseo-plugin.json` must declare `requirements.paseo`. A manifest without it is read as
+  `<0.8.0` and Paseo 0.8 refuses to load the plugin.
 - Every `Text` needs a color from `theme.colors`; unstyled text is black and invisible in
   dark themes.
 

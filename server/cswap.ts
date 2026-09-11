@@ -2,24 +2,20 @@ import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import type { PluginContext } from "@getpaseo/plugin";
 import { z } from "zod";
-import { AccountSchema, listUsage, type UsageAccount, type UsageListOutput } from "./contract";
-import { UsagePanel } from "./usage.client";
+import { AccountSchema, type UsageAccount, type UsageListOutput } from "../shared/contract";
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Absolute path on purpose: the Paseo daemon's PATH is not the shell's PATH, so `cswap`
- * is never resolved by name. Computed lazily rather than stored in a module-scope
- * constant, because `node:os` and `node:path` are stubbed to `{}` in the client bundle
- * and a module-scope `homedir()` would throw when the panel loads.
+ * is never resolved by name.
  */
-function cswapBin(): string {
-  return process.env.CSWAP_BIN ?? path.join(homedir(), ".local", "bin", "cswap");
-}
+const CSWAP_BIN = process.env.CSWAP_BIN ?? path.join(homedir(), ".local", "bin", "cswap");
 // cswap shares a ~28-30 request/hour budget per identity across every surface, so we
 // never poll faster than this. See "How it works" in README.md.
 const CACHE_TTL_MS = 60_000;
-// Daemon RPCs are cut off at 30s; fail first so the caller sees our message, not a timeout.
+// Plugin RPCs are cut off at 30s; fail first so the caller sees our message, not a timeout.
 const EXEC_TIMEOUT_MS = 25_000;
 const MAX_BUFFER_BYTES = 4 * 1024 * 1024;
 
@@ -68,10 +64,10 @@ function describeExecError(error: unknown): string {
     return `cswap killed by ${details.signal}`;
   }
   if (details.code === "ENOENT") {
-    return `cswap not found at ${cswapBin()} — set CSWAP_BIN to its absolute path`;
+    return `cswap not found at ${CSWAP_BIN} — set CSWAP_BIN to its absolute path`;
   }
   if (typeof details.code === "string") {
-    return `cswap could not run at ${cswapBin()} (${details.code})`;
+    return `cswap could not run at ${CSWAP_BIN} (${details.code})`;
   }
   const stderrLine = typeof details.stderr === "string" ? firstLine(details.stderr) : "";
   if (typeof details.code === "number") {
@@ -84,8 +80,8 @@ function describeExecError(error: unknown): string {
 function describeZodError(error: z.ZodError): string {
   const issue = error.issues[0];
   if (issue === undefined) return "unknown issue";
-  const path = issue.path.length === 0 ? "<root>" : issue.path.join(".");
-  return `${path} (${issue.code})`;
+  const location = issue.path.length === 0 ? "<root>" : issue.path.join(".");
+  return `${location} (${issue.code})`;
 }
 
 const EnvelopeSchema = z.object({
@@ -146,9 +142,7 @@ function currentOutput(): UsageListOutput {
 async function runCswap(): Promise<UsageListOutput> {
   let snapshot: UsageSnapshot;
   try {
-    // promisify is called here, not at module scope: `node:util` is stubbed to `{}`
-    // in the client bundle, so a module-scope call would throw on client load.
-    const { stdout } = await promisify(execFile)(cswapBin(), ["list", "--json"], {
+    const { stdout } = await execFileAsync(CSWAP_BIN, ["list", "--json"], {
       timeout: EXEC_TIMEOUT_MS,
       maxBuffer: MAX_BUFFER_BYTES,
       encoding: "utf8",
@@ -170,7 +164,7 @@ async function runCswap(): Promise<UsageListOutput> {
   return currentOutput();
 }
 
-function handleListUsage(): Promise<UsageListOutput> {
+export function listUsageHandler(): Promise<UsageListOutput> {
   // `at` starts at 0, so the first call always misses.
   if (Date.now() - cache.at < CACHE_TTL_MS) {
     return Promise.resolve(currentOutput());
@@ -183,28 +177,7 @@ function handleListUsage(): Promise<UsageListOutput> {
   return pending;
 }
 
-export default function contribute(plugin: PluginContext) {
-  plugin.handle(listUsage, handleListUsage);
-  plugin.addWorkspacePanel({
-    id: "usage",
-    title: "cswap usage",
-    icon: "Gauge",
-    context: "workspace",
-    locations: ["workspace", "explorer"],
-    Component: UsagePanel,
-  });
-  plugin.addCommandCenterItem({
-    id: "open-usage",
-    title: "Open cswap usage",
-    icon: "Gauge",
-    context: "workspace",
-    keywords: ["cswap", "usage", "quota"],
-    onSelect({ openPanel }) {
-      openPanel("usage");
-    },
-  });
-  // The 60s timer lives in the client's TanStack query, so there is nothing to stop here.
-  return () => {
-    inflight = null;
-  };
+/** Entry cleanup. The 60s timer lives in the client, so there is no timer to stop here. */
+export function releaseCswap(): void {
+  inflight = null;
 }
