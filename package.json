@@ -1,6 +1,6 @@
 {
   "name": "cswap-usage",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "description": "Paseo workspace panel showing usage for every claude-swap account",
   "license": "MIT",
