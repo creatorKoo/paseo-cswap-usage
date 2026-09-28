@@ -57,8 +57,8 @@ team  team@example.com           5h    ▮▮▯▯  48% 2h 05m               7d
 - 셀은 모두 `라벨 · 미니 바 · 퍼센트 · 남은 시간` 구성이고, 폭이 고정이라 열이 세로로 맞는다. 해당
   창이 없는 계정은 그 칸이 빈칸으로 남고, 패널이 표보다 좁으면 가로로 스크롤된다.
 - 바 색은 accent에서 시작해 50%에 warning, 90%에 danger로 바뀐다
-- 푸터의 **A−** / **A+** 는 글자 크기 세 단계(S/M/L)를 돌린다. 패널을 열 때마다 S에서
-  다시 시작한다. 크기는 저장하지 않는다.
+- 푸터의 **A−** / **A+** 는 글자 크기 세 단계(S/M/L)를 돌린다. 고른 크기는 호스트에
+  저장되므로 패널을 다시 열어도 그대로다. 처음에는 S다.
 - **새로고침**은 말 그대로 다시 가져오기만 한다. 60초 캐시가 살아 있으면 캐시된 값이 그대로 온다.
 
 `예상 N%`는 **선형** 추정이다. `pct / expectedPct`, 즉 지금의 소모 속도가 창이 끝날 때까지
@@ -67,7 +67,7 @@ team  team@example.com           5h    ▮▮▯▯  48% 2h 05m               7d
 출력에서 이 추정치를 빼 둔 이유이기도 하다. 창이 초기화되고 24시간쯤은 빈칸인데,
 claude-swap이 창이 어느 정도 지나기 전에는 `expectedPct`를 내주지 않기 때문이다.
 
-UI 문구는 시스템 로케일을 따른다(한국어 아니면 영어). 스크린샷은 한국어 로케일 화면이다.
+UI 문구는 시스템 로케일을 따른다(한국어 아니면 영어). 스크린샷은 모두 한국어 로케일 화면이다.
 
 계정 상태가 정상이 아니면 claude-swap이 준 상태(`token_expired`, `relogin_required`,
 `keychain_unavailable` 등)를 warning 색으로 보여준다. claude-swap이 그 계정의 마지막 정상
@@ -85,9 +85,7 @@ UI 문구는 시스템 로케일을 따른다(한국어 아니면 영어). 스�
 기본 `claude` 프로바이더로 실행한 에이전트마다, 채팅 입력창 위에 claude-swap이 지금 쓰고
 있는 계정의 pill이 붙는다:
 
-```
-[▮▮ 42% 2h31m · skt]
-```
+![pill과 툴팁](docs/pill-tooltip.png)
 
 - 아이콘의 막대 두 개는 그 계정의 5h와 7d 창이고, 색은 패널과 같다. 계정 상태가 정상이
   아니면 막대가 흐려지고 warning 색 테두리가 생긴다.
@@ -100,19 +98,36 @@ pill을 누르면 계정마다 한 줄씩 나오는 팝오버가 열리고, 활�
 실행 중인 claude 에이전트와 터미널이 모두 따라온다(macOS에서는 Claude Code의 Keychain 캐시가
 끝나는 30초쯤 뒤). **전체 보기**를 누르면 전체 표가 있는 패널이 열린다.
 
-라벨 형식은 팝오버 아래쪽에서 고른다. 버튼에 활성 계정의 실제 값이 미리 보인다.
+![전환 버튼과 라벨 형식 선택이 있는 팝오버](docs/pill-popover.png)
+
+라벨 형식은 팝오버 아래쪽에서 고른다. 버튼에 그 계정의 실제 값이 미리 보인다.
 `42% 2h31m`(기본), `42% / 14%`(5h / 7d), `42%` 중 하나이고, **Settings → Plugins →
 cswap usage** 에서도 같은 걸 고를 수 있다.
 
-pill은 기본 `claude` 프로바이더를 쓰는 에이전트에만 붙는다. 이를 extends 해서
-`cswap run <alias>`로 실행하는 프로바이더는 자기 계정에 고정돼 있으니, 활성 계정 기준 pill을
-붙이면 엉뚱한 계정의 숫자가 보이기 때문이다.
+`claude`를 extends 해서 `cswap run <계정>`으로 실행하는 프로바이더는 그 계정에 고정돼 있다.
+그래서 그 에이전트에는 활성 계정 대신 고정된 계정을 보여주는 **고정** pill이 붙는다:
+
+```json
+"claude-work": {
+  "extends": "claude",
+  "command": ["/Users/you/.local/bin/cswap", "run", "work", "--"]
+}
+```
+
+고정 pill도 읽는 법은 같다. 툴팁에는 `사용 중` 대신 `고정`이 나오고, 팝오버에는 전환 버튼이
+없다. `cswap run`으로 고정된 에이전트는 전환해도 계정이 바뀌지 않기 때문이다. 계정은
+`cswap run`이 받는 그대로 슬롯 번호, 별칭, 이메일 중 무엇이든 된다. 계정 없이 `cswap run`만
+쓰는(디렉터리 매핑) 프로바이더에는 pill이 붙지 않는다.
 
 ## 동작 방식
 
-`cswap list --json`이 유일한 데이터 출처다. claude-swap의 상태 파일을 읽지 않고, Anthropic
+`cswap list --json`이 유일한 사용량 출처다. claude-swap의 상태 파일을 읽지 않고, Anthropic
 API를 직접 부르지도 않는다. 상태를 바꾸는 명령은 딱 하나, `cswap switch <번호> --json`뿐이고
 pill 팝오버에서 **전환**을 누를 때만 실행한다. `auto`나 번호 없는 `switch`는 실행하지 않는다.
+
+고정 프로바이더를 찾으려고 서버에서 Paseo 자신의 프로바이더 설정(`paseo.config.get()`)을
+읽는다. 서버 밖으로 나가는 건 프로바이더 id와 `cswap run` 계정뿐이고, API 키가 들어 있을 수
+있는 `env` 같은 나머지 항목은 나가지 않는다.
 
 데몬이 띄운 플러그인 서브프로세스에서 도는 서버 쪽 핸들러는
 
@@ -163,12 +178,15 @@ index.client.tsx              앱 번들 진입점: 패널, pill, 설정 화면,
 index.server.ts               데몬 번들 진입점: RPC 핸들러와 설정 문서
 client/usage.tsx              패널 본체
 client/pill.tsx               pill의 게이지 아이콘, 라벨, 팝오버
-client/pill-registration.tsx  기본 claude 에이전트마다 pill을 하나씩 유지
+client/pill-registration.tsx  claude 에이전트마다 활성 또는 고정 pill을 하나씩 유지
 client/settings.tsx           pill 라벨 설정 화면
-client/common.ts              패널과 pill이 같이 쓰는 조회, 색, 헬퍼
+client/common.ts              패널과 pill이 같이 쓰는 사용량 조회
+client/format.ts              라벨·툴팁·계정 찾기 같은 순수 함수(React 없음), 테스트 대상
 server/cswap.ts               cswap 실행·캐시·파싱·전환
+server/pinned.ts              프로바이더 명령에서 `cswap run <계정>` 찾기
 shared/contract.ts            Zod RPC 계약, 양쪽 번들에 모두 들어간다
-shared/settings.ts            설정 문서
+shared/settings.ts            설정 문서: pill 라벨, 패널 글자 크기
+*.test.ts                     vitest, 각자 다루는 모듈 옆에 둔다
 ```
 
 입력창 pill에서 알아 둘 것:
@@ -199,14 +217,13 @@ Paseo 플러그인 컴파일러(0.8 이후)에서 놓치기 쉬운 것들:
 - 모든 `Text`에는 `theme.colors`의 색을 지정해야 한다. 스타일 없는 텍스트는 검은색이라
   다크 테마에서는 보이지 않는다.
 
-`npm install`을 한 번 돌린 뒤, 소스를 고칠 때마다 `npm run typecheck`와
+`npm install`을 한 번 돌린 뒤, 소스를 고칠 때마다 `npm run typecheck`, `npm test`,
 `paseo plugin reload cswap-usage`를 실행한다. 데몬은 재시작하지 않는다 — 돌고 있는 에이전트가
 죽는다.
 
-## 상태
-
-임시 플러그인이다. Paseo가 `extends`를 쓰는 프로바이더의 사용량까지 물려받으면 이 플러그인은
-지운다.
+테스트는 진짜 `cswap`을 절대 실행하지 않는다. `server/cswap.test.ts`가 `execFile`을 가짜로
+바꿔 매번 직접 응답하고, 모든 테스트가 cswap 출력이 로그에 새지 않았는지 확인한다. 리포 루트에
+코드 모듈을 두면 컴파일 에러라서 vitest 설정 파일은 없고, 기본값으로 테스트를 찾는다.
 
 ## 라이선스
 

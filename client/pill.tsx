@@ -20,30 +20,39 @@ import {
   DEFAULT_LABEL_FORMAT,
   LABEL_EXAMPLES,
   LABEL_FORMATS,
-  type LabelFormat,
   pillSettings,
 } from "../shared/settings";
+import { USAGE_QUERY_KEY, useUsageQuery } from "./common";
 import {
   accountName,
+  activeAccount,
   barColor,
   clockTime,
+  labelHead,
   type Locale,
   locale,
+  percent,
+  pillLabel,
+  pillTitle,
+  resolveAccount,
   shownUsage,
-  USAGE_QUERY_KEY,
-  useUsageQuery,
-} from "./common";
+  type TitleWords,
+  tightCountdown,
+} from "./format";
 
 type StringTable = {
   title: string;
   active: string;
+  pinned: string;
   resetsIn: (countdown: string) => string;
   lastGood: (time: string) => string;
+  notInList: (argument: string) => string;
   switchLabel: string;
   switching: string;
   switched: (name: string) => string;
   alreadyActive: (name: string) => string;
   note: string;
+  pinnedNote: (name: string) => string;
   format: string;
   formatHint: string;
   openPanel: string;
@@ -58,13 +67,16 @@ const STRINGS: Record<Locale, StringTable> = {
   ko: {
     title: "cswap 사용량",
     active: "사용 중",
+    pinned: "고정",
     resetsIn: (countdown) => `${countdown} 후 초기화`,
     lastGood: (time) => `마지막 값 ${time}`,
+    notInList: (argument) => `cswap run ${argument}: 목록에 없는 계정`,
     switchLabel: "전환",
     switching: "전환 중…",
     switched: (name) => `${name} 계정으로 전환했습니다`,
     alreadyActive: (name) => `이미 ${name} 계정입니다`,
     note: "전환하면 실행 중인 claude도 30초쯤 뒤 새 계정을 씁니다",
+    pinnedNote: (name) => `이 에이전트는 cswap run으로 ${name} 계정에 고정돼 있습니다`,
     format: "pill",
     formatHint: "pill 라벨 형식",
     openPanel: "전체 보기",
@@ -77,13 +89,16 @@ const STRINGS: Record<Locale, StringTable> = {
   en: {
     title: "cswap usage",
     active: "active",
+    pinned: "pinned",
     resetsIn: (countdown) => `resets in ${countdown}`,
     lastGood: (time) => `last value ${time}`,
+    notInList: (argument) => `cswap run ${argument}: not in the cswap list`,
     switchLabel: "Switch",
     switching: "Switching…",
     switched: (name) => `Switched to ${name}`,
     alreadyActive: (name) => `Already on ${name}`,
     note: "Running claude sessions follow a switch within about 30s",
+    pinnedNote: (name) => `This agent is pinned to ${name} by cswap run`,
     format: "pill",
     formatHint: "pill label format",
     openPanel: "Open panel",
@@ -97,71 +112,25 @@ const STRINGS: Record<Locale, StringTable> = {
 
 const strings = STRINGS[locale];
 
-function percent(usageWindow: UsageWindow | undefined): string {
-  return usageWindow === undefined ? "—" : `${Math.round(usageWindow.pct)}%`;
-}
-
-/** `2h 31m` → `2h31m`: the pill label has roughly fifteen characters to spend. */
-function tightCountdown(usageWindow: UsageWindow | undefined): string {
-  return usageWindow?.countdown?.replace(/\s+/g, "") ?? "";
-}
-
-function activeAccount(data: UsageListOutput | undefined): UsageAccount | null {
-  return data?.accounts.find((account) => account.active) ?? null;
-}
-
-/** The numbers part of the label, before the alias. */
-function labelHead(account: UsageAccount, format: LabelFormat): string {
-  const usage = shownUsage(account)?.usage;
-  if (usage === undefined) return "—";
-  const fiveHour = usage.fiveHour;
-  if (format === "5h-7d") return `${percent(fiveHour)} / ${percent(usage.sevenDay)}`;
-  if (format === "short") return percent(fiveHour);
-  return [percent(fiveHour), tightCountdown(fiveHour)].filter(Boolean).join(" ");
-}
-
 /**
- * The one-line label after the gauge icon. The alias goes last so that the host's
- * single-line ellipsis cuts a long alias, never the numbers.
+ * What a pill follows. `pinned` is the `cswap run` argument of the agent's provider; null
+ * means the built-in provider, which follows whichever account cswap has active.
  */
-export function pillLabel(account: UsageAccount, format: LabelFormat): string {
-  return `${labelHead(account, format)} · ${accountName(account)}`;
+type PillTarget = { pinned: string | null };
+
+function followedAccount(
+  data: UsageListOutput | undefined,
+  pinned: string | null,
+): UsageAccount | null {
+  return pinned === null ? activeAccount(data) : resolveAccount(data?.accounts ?? [], pinned);
 }
 
-function windowSummary(label: string, usageWindow: UsageWindow | undefined): string | null {
-  if (usageWindow === undefined) return null;
-  const reset =
-    usageWindow.countdown === undefined ? "" : ` · ${strings.resetsIn(usageWindow.countdown)}`;
-  return `${label} ${percent(usageWindow)}${reset}`;
-}
-
-/**
- * Tooltip and accessibility label: everything the label had no room for. The host caps
- * the tooltip at 280px and its Text keeps newlines, so it is one short line per fact.
- */
-function pillTitle(account: UsageAccount | null, error: string | null): string {
-  const lines: string[] = [];
-  if (account === null) {
-    lines.push("cswap");
-  } else {
-    lines.push(`${accountName(account)} · ${strings.active}`);
-    const shown = shownUsage(account);
-    for (const summary of [
-      windowSummary("5h", shown?.usage.fiveHour),
-      windowSummary("7d", shown?.usage.sevenDay),
-    ]) {
-      if (summary !== null) lines.push(summary);
-    }
-    if (account.usageStatus !== "ok") {
-      lines.push(
-        shown?.stale === true
-          ? `${account.usageStatus} · ${strings.lastGood(clockTime(account.lastGoodFetchedAt ?? null))}`
-          : account.usageStatus,
-      );
-    }
-  }
-  if (error !== null) lines.push(error);
-  return lines.join("\n");
+function titleWords(pinned: string | null): TitleWords {
+  return {
+    badge: pinned === null ? strings.active : strings.pinned,
+    resetsIn: strings.resetsIn,
+    lastGood: strings.lastGood,
+  };
 }
 
 function GaugeBar({
@@ -203,7 +172,7 @@ function GaugeBar({
 }
 
 /**
- * The pill's icon slot: two vertical bars for the active account's 5h and 7d windows.
+ * The pill's icon slot: two vertical bars for the followed account's 5h and 7d windows.
  * It also owns the label and tooltip, which it pushes into the button through `update`,
  * because only a component can subscribe to the usage query and the settings.
  */
@@ -212,11 +181,12 @@ export function PillIcon({
   size,
   layout,
   update,
-}: PluginButtonIconProps & { update(patch: Partial<PluginButton>): void }) {
+  pinned,
+}: PluginButtonIconProps & PillTarget & { update(patch: Partial<PluginButton>): void }) {
   const usage = useUsageQuery();
   const settings = useSettings(pillSettings);
   const format = settings.status === "ready" ? settings.values.labelFormat : DEFAULT_LABEL_FORMAT;
-  const account = activeAccount(usage.data);
+  const account = followedAccount(usage.data, pinned);
   const error = usage.error === null ? (usage.data?.error ?? null) : usage.error.message;
 
   const label =
@@ -224,9 +194,16 @@ export function PillIcon({
       ? pillLabel(account, format)
       : usage.isPending
         ? "…"
-        : "— · cswap";
+        : `— · ${pinned ?? "cswap"}`;
   // On compact layouts the title doubles as the bottom sheet's heading, so it stays short.
-  const title = layout.compact ? strings.title : pillTitle(account, error);
+  const title = layout.compact
+    ? strings.title
+    : pillTitle(
+        account,
+        error,
+        titleWords(pinned),
+        pinned === null ? "cswap" : strings.notInList(pinned),
+      );
   useEffect(() => {
     update({ label, title });
   }, [update, label, title]);
@@ -313,7 +290,7 @@ function usePopoverStyles(theme: PluginTheme) {
       countdown: { color: theme.colors.foregroundMuted, fontSize: FONT, width: COUNTDOWN_WIDTH },
       status: { color: theme.colors.statusWarning, fontSize: FONT, flexShrink: 1 },
       action: { width: ACTION_WIDTH, alignItems: "flex-end" as const, marginLeft: "auto" as const },
-      activeText: { color: theme.colors.accent, fontSize: FONT },
+      badgeText: { color: theme.colors.accent, fontSize: FONT },
       button: {
         backgroundColor: theme.colors.surface2,
         borderRadius: 6,
@@ -388,15 +365,24 @@ function WindowCell({
   );
 }
 
-/** One line per account: 5h and 7d, and a switch button on every account but the active one. */
+/**
+ * One line per account: 5h and 7d. The followed account gets the dot and the badge; the
+ * others get a switch button when the pill follows the active account.
+ */
 function AccountRow({
   account,
+  followed,
+  badge,
+  canSwitch,
   styles,
   theme,
   pendingNumber,
   onSwitch,
 }: {
   account: UsageAccount;
+  followed: boolean;
+  badge: string;
+  canSwitch: boolean;
   styles: PopoverStyles;
   theme: PluginTheme;
   pendingNumber: number | null;
@@ -408,10 +394,7 @@ function AccountRow({
   return (
     <View style={styles.row}>
       <View
-        style={[
-          styles.dot,
-          { backgroundColor: account.active ? theme.colors.accent : "transparent" },
-        ]}
+        style={[styles.dot, { backgroundColor: followed ? theme.colors.accent : "transparent" }]}
       />
       <Text
         style={[
@@ -447,9 +430,9 @@ function AccountRow({
         </View>
       )}
       <View style={styles.action}>
-        {account.active ? (
-          <Text style={styles.activeText}>{strings.active}</Text>
-        ) : (
+        {followed ? (
+          <Text style={styles.badgeText}>{badge}</Text>
+        ) : canSwitch && !account.active ? (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`${strings.switchLabel}: ${name}`}
@@ -462,18 +445,22 @@ function AccountRow({
               {pendingNumber === account.number ? strings.switching : strings.switchLabel}
             </Text>
           </Pressable>
-        )}
+        ) : null}
       </View>
     </View>
   );
 }
 
-/** The popover the pill opens: every account on one line, with switch buttons. */
+/**
+ * The popover the pill opens: every account on one line. On an active-account pill the
+ * others carry switch buttons; a pinned pill cannot switch its agent, so it has none.
+ */
 export function PillPopover({
   theme,
   close,
   onOpenPanel,
-}: PluginButtonContentProps & { onOpenPanel(): void }) {
+  pinned,
+}: PluginButtonContentProps & PillTarget & { onOpenPanel(): void }) {
   const styles = usePopoverStyles(theme);
   const usage = useUsageQuery();
   const settings = useSettings(pillSettings);
@@ -510,11 +497,15 @@ export function PillPopover({
   const accounts = usage.data?.accounts ?? [];
   const listError = usage.error === null ? (usage.data?.error ?? null) : usage.error.message;
   const pendingNumber = mutation.isPending ? (mutation.variables ?? null) : null;
-  const active = activeAccount(usage.data);
+  const followed = followedAccount(usage.data, pinned);
   // The format picker lives here because Paseo's settings screen has no way back for a
   // plugin to offer. Loading or invalid settings disable it rather than overwrite them.
   const ready = settings.status === "ready" ? settings : null;
   const selectedFormat = ready?.values.labelFormat ?? DEFAULT_LABEL_FORMAT;
+  const note =
+    pinned === null
+      ? strings.note
+      : strings.pinnedNote(followed === null ? pinned : accountName(followed));
 
   return (
     <View style={styles.root}>
@@ -533,6 +524,9 @@ export function PillPopover({
           <AccountRow
             key={account.number}
             account={account}
+            followed={account.number === followed?.number}
+            badge={pinned === null ? strings.active : strings.pinned}
+            canSwitch={pinned === null}
             styles={styles}
             theme={theme}
             pendingNumber={pendingNumber}
@@ -551,8 +545,9 @@ export function PillPopover({
           <Text style={styles.muted}>{strings.format}</Text>
           {LABEL_FORMATS.map((format) => {
             const selected = format === selectedFormat;
-            // Previewed with the active account's own numbers when there is one.
-            const preview = active === null ? LABEL_EXAMPLES[format] : labelHead(active, format);
+            // Previewed with the followed account's own numbers when there is one.
+            const preview =
+              followed === null ? LABEL_EXAMPLES[format] : labelHead(followed, format);
             return (
               <Pressable
                 key={format}
@@ -583,7 +578,7 @@ export function PillPopover({
         </Pressable>
       </View>
       {settings.saveError === null ? null : <Text style={styles.danger}>{settings.saveError}</Text>}
-      <Text style={styles.muted}>{strings.note}</Text>
+      <Text style={styles.muted}>{note}</Text>
     </View>
   );
 }

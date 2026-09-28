@@ -1,16 +1,10 @@
-import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
+import { type PluginWorkspacePanelProps, useSettings } from "@getpaseo/plugin/client";
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import type { UsageAccount, UsageSpend, UsageWindow } from "../shared/contract";
-import {
-  accountName,
-  barColor,
-  clockTime,
-  type Locale,
-  locale,
-  shownUsage,
-  useUsageQuery,
-} from "./common";
+import { panelSettings, TEXT_SIZES, type TextSize } from "../shared/settings";
+import { useUsageQuery } from "./common";
+import { accountName, barColor, clockTime, type Locale, locale, shownUsage } from "./format";
 
 type StringTable = {
   loading: string;
@@ -65,8 +59,8 @@ const strings = STRINGS[locale];
 
 type PluginThemeProp = PluginWorkspacePanelProps["theme"];
 
-const SIZE_STEPS = ["S", "M", "L"] as const;
-type SizeStep = (typeof SIZE_STEPS)[number];
+const SIZE_STEPS = TEXT_SIZES;
+type SizeStep = TextSize;
 
 const SIZE_SPECS: Record<SizeStep, { font: number; barWidth: number; padH: number; padV: number }> =
   {
@@ -539,9 +533,20 @@ function StepButton({
 }
 
 export function UsagePanel({ theme }: PluginWorkspacePanelProps) {
-  // Always starts at the smallest step: the panel is meant to sit in a split pane.
-  // The step is not saved, so it resets to S when the panel reopens.
-  const [step, setStep] = useState<SizeStep>("S");
+  // The step is saved per host. Until the settings load it is S, the smallest, since the
+  // panel is meant to sit in a split pane. A press shows its step at once and falls back to
+  // the stored one if the save fails.
+  const settings = useSettings(panelSettings);
+  const ready = settings.status === "ready" ? settings : null;
+  const [pendingStep, setPendingStep] = useState<SizeStep | null>(null);
+  const step: SizeStep = pendingStep ?? ready?.values.textSize ?? "S";
+  const setStep = (next: SizeStep) => {
+    if (ready === null) return;
+    setPendingStep(next);
+    void ready.save({ ...ready.values, textSize: next }, ready.revision).then(() => {
+      setPendingStep(null);
+    });
+  };
   const styles = useStyles(theme, step);
   const usage = useUsageQuery();
 
@@ -597,7 +602,7 @@ export function UsagePanel({ theme }: PluginWorkspacePanelProps) {
           <StepButton
             label="A−"
             hint={strings.smaller}
-            disabled={stepIndex <= 0}
+            disabled={stepIndex <= 0 || ready === null || settings.saving}
             styles={styles}
             onPress={() => {
               const next = SIZE_STEPS[stepIndex - 1];
@@ -607,7 +612,7 @@ export function UsagePanel({ theme }: PluginWorkspacePanelProps) {
           <StepButton
             label="A+"
             hint={strings.larger}
-            disabled={stepIndex >= SIZE_STEPS.length - 1}
+            disabled={stepIndex >= SIZE_STEPS.length - 1 || ready === null || settings.saving}
             styles={styles}
             onPress={() => {
               const next = SIZE_STEPS[stepIndex + 1];

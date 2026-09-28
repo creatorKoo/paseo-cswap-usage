@@ -83,6 +83,24 @@ export const switchAccount = defineRpc({
   }),
 });
 
+// Providers whose command is `cswap run <account>` are pinned to that account, so their
+// agents get a pill for it rather than for the active one. Read from Paseo's own provider
+// config on the server; only the provider id and the account argument come back, never the
+// rest of the provider entry (its `env` can hold API keys).
+export const listPinned = defineRpc({
+  name: "usage.pinned",
+  input: z.object({}),
+  output: z.object({
+    pinned: z.array(
+      z.object({
+        provider: z.string(),
+        /** The `cswap run` argument as written: a slot number, an alias, or an email. */
+        account: z.string(),
+      }),
+    ),
+  }),
+});
+
 export type UsageWindow = z.output<typeof WindowSchema>;
 export type UsageScoped = z.output<typeof ScopedSchema>;
 export type UsageSpend = z.output<typeof SpendSchema>;
@@ -90,3 +108,4 @@ export type UsageBlock = z.output<typeof UsageBlockSchema>;
 export type UsageAccount = z.output<typeof AccountSchema>;
 export type UsageListOutput = z.input<typeof listUsage.output>;
 export type SwitchOutput = z.input<typeof switchAccount.output>;
+export type PinnedOutput = z.input<typeof listPinned.output>;

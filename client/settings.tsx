@@ -7,7 +7,7 @@ import {
 } from "@getpaseo/plugin/client/ui";
 import { Text } from "react-native";
 import { LABEL_EXAMPLES, LABEL_FORMATS, pillSettings } from "../shared/settings";
-import { type Locale, locale } from "./common";
+import { type Locale, locale } from "./format";
 
 type StringTable = {
   section: string;
@@ -43,7 +43,7 @@ const strings = STRINGS[locale];
 
 // The menu cuts long option labels, so each option is just what the pill would show.
 const FORMAT_OPTIONS = LABEL_FORMATS.map((value) => ({
-  label: `${LABEL_EXAMPLES[value]} · skt`,
+  label: `${LABEL_EXAMPLES[value]} · work`,
   value,
 }));
 

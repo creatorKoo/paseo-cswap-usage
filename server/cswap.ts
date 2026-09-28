@@ -172,7 +172,9 @@ async function runCswap(): Promise<UsageListOutput> {
       encoding: "utf8",
     });
     snapshot = parseSnapshot(stdout);
-    if (lastSwitch !== null && startedAt < lastSwitch.at) {
+    // `<=`: a list that starts in the very millisecond the switch lands may still have read
+    // the old state, and reapplying the same active account to a fresh one is harmless.
+    if (lastSwitch !== null && startedAt <= lastSwitch.at) {
       snapshot = withActive(snapshot, lastSwitch.number);
     }
   } catch (error) {

@@ -59,8 +59,8 @@ team  team@example.com           5h    ▮▮▯▯  48% 2h 05m               7d
   line up, an account without a window leaves that cell blank, and the table scrolls
   sideways when the pane is narrower than the table.
 - bar color goes accent → warning at 50% → danger at 90%
-- **A−** / **A+** in the footer cycle three text sizes (S/M/L). It starts at S every time
-  the panel opens; the size is not saved.
+- **A−** / **A+** in the footer cycle three text sizes (S/M/L). The choice is saved on the
+  host, so the panel reopens at the same size; it starts at S.
 - **Refresh** just refetches. Within the 60s cache window you get the cached value back.
 
 `est. N%` is a **linear** projection: `pct / expectedPct`, extrapolating the current burn
@@ -69,7 +69,7 @@ a rough signal — bursty usage skews it badly, which is why claude-swap leaves 
 out of its own human-facing output. It is blank for roughly the first 24 hours after a
 reset, because claude-swap does not publish `expectedPct` until the window has run a while.
 
-UI strings follow the system locale (Korean or English). The screenshot shows the Korean
+UI strings follow the system locale (Korean or English). The screenshots show the Korean
 locale; `예상` is `est.`
 
 If an account is not healthy, its status (`token_expired`, `relogin_required`,
@@ -90,9 +90,7 @@ state for a while.
 Every agent on the built-in `claude` provider gets a pill above its chat input for the
 account claude-swap is currently on:
 
-```
-[▮▮ 42% 2h31m · skt]
-```
+![The pill and its tooltip](docs/pill-tooltip.png)
 
 - The icon's two bars are that account's 5h and 7d windows, in the panel's colors. They
   dim and get a warning outline when the account is not healthy.
@@ -105,20 +103,37 @@ inactive one. Switching runs `cswap switch <number>`, which switches the whole m
 running claude agent and terminal on the default login follows it (on macOS within about 30
 seconds, once Claude Code's Keychain cache expires). **Open panel** opens the full table.
 
-The popover's footer also picks the label, previewed with the active account's numbers:
+![The popover, with switch buttons and the label picker](docs/pill-popover.png)
+
+The popover's footer also picks the label, previewed with the account's own numbers:
 `42% 2h31m` (default), `42% / 14%` (5h / 7d), or `42%`. The same choice is in
 **Settings → Plugins → cswap usage**.
 
-The pill only appears on agents that use the built-in `claude` provider. Providers that
-extend it and launch `cswap run <alias>` are pinned to their own account, so an
-active-account pill would show the wrong numbers there.
+A provider that extends `claude` and launches `cswap run <account>` is pinned to that
+account, so its agents get a **pinned** pill for that account instead of the active one:
+
+```json
+"claude-work": {
+  "extends": "claude",
+  "command": ["/Users/you/.local/bin/cswap", "run", "work", "--"]
+}
+```
+
+A pinned pill reads the same way, its tooltip says `pinned` where the other says `active`,
+and its popover has no switch buttons, because a switch never moves an agent that
+`cswap run` pinned. The account can be a slot number, an alias, or an email, as `cswap run`
+takes it. A `cswap run` with no account (the directory mapping) gets no pill.
 
 ## How it works
 
-`cswap list --json` is the only data source. The plugin never reads claude-swap's state
+`cswap list --json` is the only source of usage. The plugin never reads claude-swap's state
 files and never calls the Anthropic API directly. It runs exactly one command that changes
 state — `cswap switch <number> --json` — and only when you press **Switch** in the pill
 popover. It never runs `auto` or a bare `switch`.
+
+To find pinned providers it reads Paseo's own provider config on the server
+(`paseo.config.get()`). Only each provider's id and its `cswap run` account leave the
+server; the rest of the entry, including any `env` with API keys, never does.
 
 The server-side handler, which runs in the plugin subprocess the daemon starts:
 
@@ -167,15 +182,18 @@ source installed with `paseo plugin add`, it also deletes the managed checkout.
 
 ```text
 index.client.tsx              app bundle: panel, pills, settings screen, Command Center
-index.server.ts               daemon bundle: RPC handlers and the settings document
+index.server.ts               daemon bundle: RPC handlers and the settings documents
 client/usage.tsx              the panel itself
 client/pill.tsx               the pill's gauge icon, label, and popover
-client/pill-registration.tsx  keeps one pill on every built-in claude agent
+client/pill-registration.tsx  keeps one pill on every claude agent, active or pinned
 client/settings.tsx           the pill label setting
-client/common.ts              the query, colors, and helpers the panel and pill share
+client/common.ts              the usage query the panel and pills share
+client/format.ts              pure labels, tooltips, and lookups (no React), tested
 server/cswap.ts               spawning cswap, caching, parsing, switching
+server/pinned.ts              finding `cswap run <account>` in provider commands
 shared/contract.ts            the Zod RPC contracts, compiled into both bundles
-shared/settings.ts            the settings document
+shared/settings.ts            the settings documents: pill label, panel text size
+*.test.ts                     vitest, next to the module each one covers
 ```
 
 Notes on composer pills:
@@ -210,12 +228,14 @@ Notes on the Paseo plugin compiler (0.8 and later) that are easy to get wrong:
 - Every `Text` needs a color from `theme.colors`; unstyled text is black and invisible in
   dark themes.
 
-Run `npm install` once, then `npm run typecheck` and `paseo plugin reload cswap-usage`
-after any source change. Do not restart the daemon — it kills running agents.
+Run `npm install` once, then `npm run typecheck`, `npm test`, and
+`paseo plugin reload cswap-usage` after any source change. Do not restart the daemon — it
+kills running agents.
 
-## Status
-
-Temporary. Delete this plugin once Paseo inherits usage for providers that use `extends`.
+The tests never run a real `cswap`: `server/cswap.test.ts` mocks `execFile` and answers
+each spawn itself, and every test checks that nothing from cswap's output reached the logs.
+There is no vitest config file, since any code module in the repository root is a compile
+error; the defaults find the tests.
 
 ## License
 
