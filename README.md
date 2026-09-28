@@ -3,7 +3,8 @@
 [한국어](README.ko.md)
 
 A [Paseo](https://paseo.sh) workspace panel that shows Claude usage for every
-[claude-swap](https://pypi.org/project/claude-swap/) account on one line each.
+[claude-swap](https://pypi.org/project/claude-swap/) account on one line each, plus a
+composer pill that shows the active account's usage and switches accounts in two clicks.
 
 ![The panel showing three accounts, one line each](docs/screenshot.png)
 
@@ -18,7 +19,7 @@ This panel fills that gap until Paseo inherits usage for extended providers.
 
 ## Requirements
 
-- Paseo 0.8.0 or newer
+- Paseo 0.9.2 or newer
 - Plugins enabled on the target daemon (**Settings → Plugins → Enable plugins**)
 - [`claude-swap`](https://pypi.org/project/claude-swap/) installed, with `cswap list --json` working
 
@@ -59,7 +60,7 @@ team  team@example.com           5h    ▮▮▯▯  48% 2h 05m               7d
   sideways when the pane is narrower than the table.
 - bar color goes accent → warning at 50% → danger at 90%
 - **A−** / **A+** in the footer cycle three text sizes (S/M/L). It starts at S every time
-  the panel opens; plugins have no storage API.
+  the panel opens; the size is not saved.
 - **Refresh** just refetches. Within the 60s cache window you get the cached value back.
 
 `est. N%` is a **linear** projection: `pct / expectedPct`, extrapolating the current burn
@@ -84,11 +85,38 @@ account's credential, because claude-swap leaves that token alone rather than lo
 out. The running Claude refreshes it on its next API call, so an idle session can sit in this
 state for a while.
 
+### Composer pill
+
+Every agent on the built-in `claude` provider gets a pill above its chat input for the
+account claude-swap is currently on:
+
+```
+[▮▮ 42% 2h31m · skt]
+```
+
+- The icon's two bars are that account's 5h and 7d windows, in the panel's colors. They
+  dim and get a warning outline when the account is not healthy.
+- The label is the 5h percent and time to reset, then the alias. The alias comes last, so a
+  long one is what gets cut to `…`. Hover for the full reading: both windows, their resets,
+  and any status.
+- Pick another label in **Settings → Plugins → cswap usage**: `42% 2h31m · skt` (default),
+  `42% / 14% · skt` (5h / 7d), or `42% · skt`.
+
+Press the pill for a popover with every account on one line and a **Switch** button on each
+inactive one. Switching runs `cswap switch <number>`, which switches the whole machine: every
+running claude agent and terminal on the default login follows it (on macOS within about 30
+seconds, once Claude Code's Keychain cache expires). **Open panel** opens the full table.
+
+The pill only appears on agents that use the built-in `claude` provider. Providers that
+extend it and launch `cswap run <alias>` are pinned to their own account, so an
+active-account pill would show the wrong numbers there.
+
 ## How it works
 
 `cswap list --json` is the only data source. The plugin never reads claude-swap's state
-files, never calls the Anthropic API directly, and never runs a claude-swap command that
-changes state — no `switch`, no `auto`. It is strictly read-only.
+files and never calls the Anthropic API directly. It runs exactly one command that changes
+state — `cswap switch <number> --json` — and only when you press **Switch** in the pill
+popover. It never runs `auto` or a bare `switch`.
 
 The server-side handler, which runs in the plugin subprocess the daemon starts:
 
@@ -98,7 +126,11 @@ The server-side handler, which runs in the plugin subprocess the daemon starts:
 - is **single-flight**: concurrent calls share one subprocess, never two.
 - is **stale-on-error**: a failed call keeps the previous snapshot and only sets an error
   line, matching claude-swap's own behavior.
-- never logs the subprocess stdout, which carries emails and organization names.
+- accepts a switch only for an account number from the last list, runs one switch at a
+  time, and then marks the new active account in its cache rather than spawning another
+  `cswap list`. The panel, every pill, and every popover share one query, so they add no
+  polling of their own.
+- never logs the stdout of either command, which carries emails and organization names.
 
 Fields the panel does not render (`organizationName`, `organizationUuid`,
 `projectedExhaustionAt`, …) are dropped by the Zod schema on the server side, so they never
@@ -132,14 +164,29 @@ source installed with `paseo plugin add`, it also deletes the managed checkout.
 ## Development notes
 
 ```text
-index.client.tsx    app bundle: panel and Command Center registrations
-index.server.ts     daemon bundle: the RPC handler
-client/usage.tsx    the panel itself
-server/cswap.ts     spawning cswap, caching, parsing
-shared/contract.ts  the Zod RPC contract, compiled into both bundles
+index.client.tsx              app bundle: panel, pills, settings screen, Command Center
+index.server.ts               daemon bundle: RPC handlers and the settings document
+client/usage.tsx              the panel itself
+client/pill.tsx               the pill's gauge icon, label, and popover
+client/pill-registration.tsx  keeps one pill on every built-in claude agent
+client/settings.tsx           the pill label setting
+client/common.ts              the query, colors, and helpers the panel and pill share
+server/cswap.ts               spawning cswap, caching, parsing, switching
+shared/contract.ts            the Zod RPC contracts, compiled into both bundles
+shared/settings.ts            the settings document
 ```
 
-Notes on the Paseo 0.8 plugin compiler that are easy to get wrong:
+Notes on composer pills:
+
+- Paseo draws the pill: one line, capped at 160px wide, in its own font and muted color. A
+  plugin only supplies the label string and a 16×16 icon, so detail goes in the tooltip and
+  the popover.
+- The icon component owns the label. Only a component can subscribe to the usage query and
+  the settings, so it pushes `{ label, title }` through the registration's `update` from an
+  effect.
+- On compact layouts the title doubles as the bottom sheet heading, so it stays short there.
+
+Notes on the Paseo plugin compiler (0.8 and later) that are easy to get wrong:
 
 - There are **two entry points**, `index.client.tsx` and `index.server.ts`, each with its
   own `contribute()` default export. A plugin needs at least one; this one has both.

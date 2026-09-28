@@ -52,16 +52,34 @@ export const AccountSchema = z.object({
   lastGoodFetchedAt: z.string().optional(),
 });
 
+const ListOutputSchema = z.object({
+  /** Last successful cswap call (ISO). Null until the first success. */
+  fetchedAt: z.string().nullable(),
+  /** Message from the most recent failure, or null when the last call succeeded. */
+  error: z.string().nullable(),
+  activeAccountNumber: z.number().nullable(),
+  accounts: z.array(AccountSchema),
+});
+
 export const listUsage = defineRpc({
   name: "usage.list",
   input: z.object({}),
+  output: ListOutputSchema,
+});
+
+// The one state-changing call: `cswap switch <number> --json`, run only when the user
+// presses a switch button. `usage` is the list with the new active account already
+// applied, so the caller can update its query without spawning `cswap list` again.
+export const switchAccount = defineRpc({
+  name: "usage.switch",
+  input: z.object({ number: z.number().int().positive() }),
   output: z.object({
-    /** Last successful cswap call (ISO). Null until the first success. */
-    fetchedAt: z.string().nullable(),
-    /** Message from the most recent failure, or null when the last call succeeded. */
+    /** False when cswap found the account already active, or when the switch failed. */
+    switched: z.boolean(),
+    /** Failure message, or null when cswap accepted the switch. */
     error: z.string().nullable(),
-    activeAccountNumber: z.number().nullable(),
-    accounts: z.array(AccountSchema),
+    warnings: z.array(z.string()),
+    usage: ListOutputSchema,
   }),
 });
 
@@ -71,3 +89,4 @@ export type UsageSpend = z.output<typeof SpendSchema>;
 export type UsageBlock = z.output<typeof UsageBlockSchema>;
 export type UsageAccount = z.output<typeof AccountSchema>;
 export type UsageListOutput = z.input<typeof listUsage.output>;
+export type SwitchOutput = z.input<typeof switchAccount.output>;

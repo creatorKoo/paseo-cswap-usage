@@ -3,7 +3,8 @@
 [English](README.md)
 
 [claude-swap](https://pypi.org/project/claude-swap/) 계정마다 Claude 사용량을 한 줄씩
-보여주는 [Paseo](https://paseo.sh) 워크스페이스 패널.
+보여주는 [Paseo](https://paseo.sh) 워크스페이스 패널. 활성 계정의 사용량을 보여주고 두 번
+눌러 계정을 바꾸는 입력창 위 pill도 함께 들어 있다.
 
 ![세 개 계정이 한 줄씩 표시된 패널](docs/screenshot.png)
 
@@ -18,7 +19,7 @@ Claude 계정 여러 개를 돌려 쓰고 있다면 이들을 한눈에 볼 방�
 
 ## 요구 사항
 
-- Paseo 0.8.0 이상
+- Paseo 0.9.2 이상
 - 대상 데몬에서 플러그인 활성화(**Settings → Plugins → Enable plugins**)
 - [`claude-swap`](https://pypi.org/project/claude-swap/) 설치, `cswap list --json` 이 정상 동작
 
@@ -57,7 +58,7 @@ team  team@example.com           5h    ▮▮▯▯  48% 2h 05m               7d
   창이 없는 계정은 그 칸이 빈칸으로 남고, 패널이 표보다 좁으면 가로로 스크롤된다.
 - 바 색은 accent에서 시작해 50%에 warning, 90%에 danger로 바뀐다
 - 푸터의 **A−** / **A+** 는 글자 크기 세 단계(S/M/L)를 돌린다. 패널을 열 때마다 S에서
-  다시 시작한다. 플러그인에는 저장소 API가 없다.
+  다시 시작한다. 크기는 저장하지 않는다.
 - **새로고침**은 말 그대로 다시 가져오기만 한다. 60초 캐시가 살아 있으면 캐시된 값이 그대로 온다.
 
 `예상 N%`는 **선형** 추정이다. `pct / expectedPct`, 즉 지금의 소모 속도가 창이 끝날 때까지
@@ -79,11 +80,36 @@ UI 문구는 시스템 로케일을 따른다(한국어 아니면 영어). 스�
 세션을 로그아웃시키지 않으려고 토큰을 건드리지 않는다. 돌고 있는 Claude가 다음 API 호출 때
 스스로 갱신하므로, 유휴 세션이면 이 상태가 한동안 유지될 수 있다.
 
+### 입력창 위 pill
+
+기본 `claude` 프로바이더로 실행한 에이전트마다, 채팅 입력창 위에 claude-swap이 지금 쓰고
+있는 계정의 pill이 붙는다:
+
+```
+[▮▮ 42% 2h31m · skt]
+```
+
+- 아이콘의 막대 두 개는 그 계정의 5h와 7d 창이고, 색은 패널과 같다. 계정 상태가 정상이
+  아니면 막대가 흐려지고 warning 색 테두리가 생긴다.
+- 라벨은 5h 사용률과 초기화까지 남은 시간, 그리고 맨 뒤에 별칭이다. 별칭이 뒤에 있어서 길면
+  별칭 쪽이 `…`로 잘린다. 마우스를 올리면 두 창의 사용률, 초기화 시간, 상태가 모두 나온다.
+- 라벨 형식은 **Settings → Plugins → cswap usage** 에서 고른다. `42% 2h31m · skt`(기본),
+  `42% / 14% · skt`(5h / 7d), `42% · skt` 중 하나.
+
+pill을 누르면 계정마다 한 줄씩 나오는 팝오버가 열리고, 활성이 아닌 계정에는 **전환** 버튼이
+있다. 전환은 `cswap switch <번호>`를 실행하므로 이 컴퓨터 전체가 바뀐다. 기본 로그인을 쓰는
+실행 중인 claude 에이전트와 터미널이 모두 따라온다(macOS에서는 Claude Code의 Keychain 캐시가
+끝나는 30초쯤 뒤). **전체 보기**를 누르면 전체 표가 있는 패널이 열린다.
+
+pill은 기본 `claude` 프로바이더를 쓰는 에이전트에만 붙는다. 이를 extends 해서
+`cswap run <alias>`로 실행하는 프로바이더는 자기 계정에 고정돼 있으니, 활성 계정 기준 pill을
+붙이면 엉뚱한 계정의 숫자가 보이기 때문이다.
+
 ## 동작 방식
 
 `cswap list --json`이 유일한 데이터 출처다. claude-swap의 상태 파일을 읽지 않고, Anthropic
-API를 직접 부르지도 않으며, 상태를 바꾸는 claude-swap 명령(`switch`, `auto`)도 실행하지 않는다.
-철저히 읽기 전용이다.
+API를 직접 부르지도 않는다. 상태를 바꾸는 명령은 딱 하나, `cswap switch <번호> --json`뿐이고
+pill 팝오버에서 **전환**을 누를 때만 실행한다. `auto`나 번호 없는 `switch`는 실행하지 않는다.
 
 데몬이 띄운 플러그인 서브프로세스에서 도는 서버 쪽 핸들러는
 
@@ -94,7 +120,10 @@ API를 직접 부르지도 않으며, 상태를 바꾸는 claude-swap 명령(`sw
   두 개가 뜨는 일은 없다.
 - **실패해도 이전 값을 유지한다(stale-on-error)**. 호출이 실패하면 직전 스냅샷을 그대로 두고
   오류 줄만 세운다. claude-swap 자신의 동작과 같다.
-- 서브프로세스 stdout은 절대 로그에 남기지 않는다. 이메일과 조직 이름이 들어 있다.
+- 전환은 직전 목록에 있는 계정 번호만 받고, 한 번에 하나만 실행한다. 전환이 끝나면
+  `cswap list`를 다시 띄우지 않고 캐시의 활성 계정 표시만 고친다. 패널, 모든 pill, 모든
+  팝오버가 조회 하나를 같이 쓰므로 조회 횟수가 늘지 않는다.
+- 두 명령의 stdout 모두 절대 로그에 남기지 않는다. 이메일과 조직 이름이 들어 있다.
 
 패널이 그리지 않는 필드(`organizationName`, `organizationUuid`, `projectedExhaustionAt` 등)는
 서버 쪽 Zod 스키마에서 걸러내므로 클라이언트까지 아예 넘어가지 않는다.
@@ -127,14 +156,27 @@ paseo plugin remove cswap-usage
 ## 개발 메모
 
 ```text
-index.client.tsx    앱 번들 진입점: 패널과 커맨드 센터 등록
-index.server.ts     데몬 번들 진입점: RPC 핸들러
-client/usage.tsx    패널 본체
-server/cswap.ts     cswap 실행·캐시·파싱
-shared/contract.ts  Zod RPC 계약, 양쪽 번들에 모두 들어간다
+index.client.tsx              앱 번들 진입점: 패널, pill, 설정 화면, 커맨드 센터 등록
+index.server.ts               데몬 번들 진입점: RPC 핸들러와 설정 문서
+client/usage.tsx              패널 본체
+client/pill.tsx               pill의 게이지 아이콘, 라벨, 팝오버
+client/pill-registration.tsx  기본 claude 에이전트마다 pill을 하나씩 유지
+client/settings.tsx           pill 라벨 설정 화면
+client/common.ts              패널과 pill이 같이 쓰는 조회, 색, 헬퍼
+server/cswap.ts               cswap 실행·캐시·파싱·전환
+shared/contract.ts            Zod RPC 계약, 양쪽 번들에 모두 들어간다
+shared/settings.ts            설정 문서
 ```
 
-Paseo 0.8 플러그인 컴파일러에서 놓치기 쉬운 것들:
+입력창 pill에서 알아 둘 것:
+
+- pill은 Paseo가 그린다. 한 줄에 폭은 최대 160px이고, 글꼴과 색(흐린 회색)도 Paseo가 정한다.
+  플러그인이 정하는 건 라벨 문자열과 16×16 아이콘뿐이라, 자세한 내용은 툴팁과 팝오버에 둔다.
+- 라벨은 아이콘 컴포넌트가 맡는다. 사용량 조회와 설정을 구독할 수 있는 건 컴포넌트뿐이라,
+  effect 안에서 등록의 `update`로 `{ label, title }`을 밀어 넣는다.
+- 좁은 화면에서는 title이 바텀 시트 제목으로도 쓰이므로 그때는 짧게 둔다.
+
+Paseo 플러그인 컴파일러(0.8 이후)에서 놓치기 쉬운 것들:
 
 - 진입점이 **둘**이다. `index.client.tsx`와 `index.server.ts`가 각각 `contribute()`를 기본
   내보내기로 갖는다. 최소 하나는 있어야 하고, 이 플러그인은 둘 다 쓴다.

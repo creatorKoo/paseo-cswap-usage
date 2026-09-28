@@ -1,18 +1,16 @@
-import { type PluginWorkspacePanelProps, useRpc } from "@getpaseo/plugin/client";
-import { useQuery } from "@tanstack/react-query";
+import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
+import type { UsageAccount, UsageSpend, UsageWindow } from "../shared/contract";
 import {
-  listUsage,
-  type UsageAccount,
-  type UsageBlock,
-  type UsageSpend,
-  type UsageWindow,
-} from "../shared/contract";
-
-const POLL_INTERVAL_MS = 60_000;
-
-type Locale = "ko" | "en";
+  accountName,
+  barColor,
+  clockTime,
+  type Locale,
+  locale,
+  shownUsage,
+  useUsageQuery,
+} from "./common";
 
 type StringTable = {
   loading: string;
@@ -63,18 +61,7 @@ const STRINGS: Record<Locale, StringTable> = {
   },
 };
 
-/** Korean for Korean systems, English everywhere else. Intl access is guarded: Hermes
- *  builds without full ICU can throw here, and a missing locale must not blank the panel. */
-function detectLocale(): Locale {
-  try {
-    const locale = Intl.DateTimeFormat().resolvedOptions().locale;
-    return locale.toLowerCase().startsWith("ko") ? "ko" : "en";
-  } catch {
-    return "en";
-  }
-}
-
-const strings = STRINGS[detectLocale()];
+const strings = STRINGS[locale];
 
 type PluginThemeProp = PluginWorkspacePanelProps["theme"];
 
@@ -280,7 +267,7 @@ function headerWidthFor(accounts: UsageAccount[], font: number): number {
   let width = 0;
   for (const account of accounts) {
     // The alias is a step larger and bold, which the 1.1 factor stands in for.
-    const alias = estimateWidth(account.alias ?? `#${account.number}`, font + 1) * 1.1;
+    const alias = estimateWidth(accountName(account), font + 1) * 1.1;
     const email = account.email === undefined ? 0 : estimateWidth(account.email, font);
     // A degraded account that still draws last-good cells carries its status as a badge
     // beside `active`, plus the padding the badge style adds.
@@ -297,33 +284,6 @@ function headerWidthFor(accounts: UsageAccount[], font: number): number {
 function projectionSuffix(chip: Chip): string {
   if (chip.projection === null) return "";
   return chip.detail === "" ? chip.projection.text : ` · ${chip.projection.text}`;
-}
-
-function clockTime(iso: string | null): string {
-  if (iso === null) return "—";
-  const parsed = new Date(iso);
-  if (Number.isNaN(parsed.getTime())) return "—";
-  return parsed.toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
-}
-
-/**
- * The usage block a row draws. Live `usage` when the fetch succeeded; otherwise the
- * `lastGoodUsage` cswap carries for an account it could not refresh this pass (for example
- * `token_expired` while a live `cswap run` session owns the credential — cswap leaves that
- * token alone so it does not log the session out). `stale` marks the fallback so the row can
- * dim it and show the status badge. Null when there is nothing to draw at all.
- */
-function shownUsage(account: UsageAccount): { usage: UsageBlock; stale: boolean } | null {
-  if (account.usageStatus === "ok") {
-    return account.usage == null ? null : { usage: account.usage, stale: false };
-  }
-  if (account.lastGoodUsage !== undefined) return { usage: account.lastGoodUsage, stale: true };
-  return null;
 }
 
 type Styles = ReturnType<typeof useStyles>;
@@ -442,12 +402,6 @@ function useStyles(theme: PluginThemeProp, step: SizeStep) {
   }, [theme, step]);
 }
 
-function barColor(theme: PluginThemeProp, pct: number): string {
-  if (pct < 50) return theme.colors.accent;
-  if (pct < 90) return theme.colors.statusWarning;
-  return theme.colors.statusDanger;
-}
-
 function UsageChip({
   chip,
   column,
@@ -522,7 +476,7 @@ function AccountLine({
   return (
     <View style={divider ? [styles.accountRow, styles.accountDivider] : styles.accountRow}>
       <View style={[styles.headerChip, { width: headerWidth }]}>
-        <Text style={styles.alias}>{account.alias ?? `#${account.number}`}</Text>
+        <Text style={styles.alias}>{accountName(account)}</Text>
         <Text style={styles.email} numberOfLines={1}>
           {account.email ?? ""}
         </Text>
@@ -586,17 +540,10 @@ function StepButton({
 
 export function UsagePanel({ theme }: PluginWorkspacePanelProps) {
   // Always starts at the smallest step: the panel is meant to sit in a split pane.
-  // There is no plugin storage API, so it resets to S when the panel reopens.
+  // The step is not saved, so it resets to S when the panel reopens.
   const [step, setStep] = useState<SizeStep>("S");
   const styles = useStyles(theme, step);
-  const list = useRpc(listUsage);
-  const usage = useQuery({
-    queryKey: ["cswap-usage", "list"],
-    queryFn: () => list({}),
-    refetchInterval: POLL_INTERVAL_MS,
-    refetchIntervalInBackground: false,
-    staleTime: POLL_INTERVAL_MS - 5_000,
-  });
+  const usage = useUsageQuery();
 
   const accounts = usage.data?.accounts ?? [];
   const columns = useMemo(

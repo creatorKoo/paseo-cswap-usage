@@ -3,7 +3,12 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
-import { AccountSchema, type UsageAccount, type UsageListOutput } from "../shared/contract";
+import {
+  AccountSchema,
+  type SwitchOutput,
+  type UsageAccount,
+  type UsageListOutput,
+} from "../shared/contract";
 
 const execFileAsync = promisify(execFile);
 
@@ -35,6 +40,12 @@ let cache: {
 } = { snapshot: null, fetchedAt: null, error: null, at: 0 };
 
 let inflight: Promise<UsageListOutput> | null = null;
+
+let switching: Promise<SwitchOutput> | null = null;
+
+// Set by a successful switch. A `cswap list` that was already running when the switch
+// landed still reports the old active account, so its snapshot gets this applied on top.
+let lastSwitch: { number: number; at: number } | null = null;
 
 /** Raised for payload problems, whose messages are safe to log. */
 class CswapPayloadError extends Error {}
@@ -138,8 +149,21 @@ function currentOutput(): UsageListOutput {
   };
 }
 
+/** The snapshot with `number` as the only active account. */
+function withActive(snapshot: UsageSnapshot, number: number): UsageSnapshot {
+  return {
+    activeAccountNumber: number,
+    accounts: snapshot.accounts.map((account) =>
+      account.active === (account.number === number)
+        ? account
+        : { ...account, active: account.number === number },
+    ),
+  };
+}
+
 /** Never rejects: single-flight callers all share one settled result. */
 async function runCswap(): Promise<UsageListOutput> {
+  const startedAt = Date.now();
   let snapshot: UsageSnapshot;
   try {
     const { stdout } = await execFileAsync(CSWAP_BIN, ["list", "--json"], {
@@ -148,6 +172,9 @@ async function runCswap(): Promise<UsageListOutput> {
       encoding: "utf8",
     });
     snapshot = parseSnapshot(stdout);
+    if (lastSwitch !== null && startedAt < lastSwitch.at) {
+      snapshot = withActive(snapshot, lastSwitch.number);
+    }
   } catch (error) {
     const message =
       error instanceof CswapPayloadError ? error.message : describeExecError(error);
@@ -177,7 +204,103 @@ export function listUsageHandler(): Promise<UsageListOutput> {
   return pending;
 }
 
+const SwitchResultSchema = z.object({
+  schemaVersion: z.number(),
+  switched: z.boolean(),
+  to: z.object({ number: z.number().nullable() }).nullable().optional(),
+  warnings: z.array(z.string()).optional(),
+});
+
+// With --json, a handled cswap error exits 1 and prints this envelope to stdout.
+const SwitchErrorSchema = z.object({
+  error: z.object({ type: z.string(), message: z.string() }),
+});
+
+function switchFailure(message: string): SwitchOutput {
+  return { switched: false, error: message, warnings: [], usage: currentOutput() };
+}
+
+function switchErrorEnvelope(error: unknown): { type: string; message: string } | null {
+  const stdout = (error as { stdout?: unknown } | null)?.stdout;
+  if (typeof stdout !== "string") return null;
+  try {
+    const parsed = SwitchErrorSchema.safeParse(JSON.parse(stdout));
+    return parsed.success ? parsed.data.error : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Never rejects, like runCswap. stdout names emails, so none of it is logged. */
+async function runSwitch(number: number): Promise<SwitchOutput> {
+  let stdout: string;
+  try {
+    ({ stdout } = await execFileAsync(CSWAP_BIN, ["switch", String(number), "--json"], {
+      timeout: EXEC_TIMEOUT_MS,
+      maxBuffer: MAX_BUFFER_BYTES,
+      encoding: "utf8",
+    }));
+  } catch (error) {
+    const envelope = switchErrorEnvelope(error);
+    if (envelope !== null) {
+      // The message can name an email, so only its type is logged.
+      console.error(`[cswap-usage] cswap switch failed (${envelope.type})`);
+      return switchFailure(firstLine(envelope.message));
+    }
+    const message = describeExecError(error);
+    console.error(`[cswap-usage] ${message}`);
+    return switchFailure(message);
+  }
+
+  let result: z.output<typeof SwitchResultSchema> | null = null;
+  try {
+    const parsed = SwitchResultSchema.safeParse(JSON.parse(stdout));
+    if (parsed.success && parsed.data.schemaVersion === 1) result = parsed.data;
+  } catch {
+    // Handled below: the parser's own message quotes the input.
+  }
+  if (result === null) {
+    // cswap exited 0, so the switch may well have happened. Expire the cache so the next
+    // list call reports the real active account instead of a guess.
+    cache = { ...cache, at: 0 };
+    console.error("[cswap-usage] cswap switch returned an unexpected payload");
+    return switchFailure("cswap switch returned an unexpected payload");
+  }
+
+  const target = result.to?.number ?? number;
+  lastSwitch = { number: target, at: Date.now() };
+  if (cache.snapshot !== null) {
+    cache = { ...cache, snapshot: withActive(cache.snapshot, target) };
+  }
+  return {
+    switched: result.switched,
+    error: null,
+    warnings: result.warnings ?? [],
+    usage: currentOutput(),
+  };
+}
+
+export function switchAccountHandler({ number }: { number: number }): Promise<SwitchOutput> {
+  if (switching !== null) {
+    return Promise.resolve(switchFailure("another switch is still running"));
+  }
+  // Only accounts from the last list are accepted, so the argument is always a slot
+  // cswap itself reported.
+  if (cache.snapshot === null) {
+    return Promise.resolve(switchFailure("no cswap list yet — try again after it loads"));
+  }
+  if (!cache.snapshot.accounts.some((account) => account.number === number)) {
+    return Promise.resolve(switchFailure(`account ${number} is not in the cswap list`));
+  }
+  const pending = runSwitch(number).finally(() => {
+    if (switching === pending) switching = null;
+  });
+  switching = pending;
+  return pending;
+}
+
 /** Entry cleanup. The 60s timer lives in the client, so there is no timer to stop here. */
 export function releaseCswap(): void {
   inflight = null;
+  switching = null;
 }

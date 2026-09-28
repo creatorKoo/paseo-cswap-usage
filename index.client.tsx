@@ -1,4 +1,6 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
+import { registerUsagePills } from "./client/pill-registration";
+import { PillSettingsScreen } from "./client/settings";
 import { UsagePanel } from "./client/usage";
 
 export default function contribute(client: PluginClientContext) {
@@ -20,6 +22,13 @@ export default function contribute(client: PluginClientContext) {
       openPanel("usage");
     },
   });
-  // The 60s poll timer lives in the panel's TanStack query, so there is nothing to stop.
-  return () => {};
+  client.addSettingsScreen({
+    id: "pill",
+    title: "cswap usage",
+    icon: "Gauge",
+    Component: PillSettingsScreen,
+  });
+  // The 60s poll timer lives in the shared TanStack query, so the pills' agent
+  // observation is the only thing to stop.
+  return registerUsagePills(client);
 }
