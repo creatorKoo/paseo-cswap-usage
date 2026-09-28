@@ -97,15 +97,17 @@ account claude-swap is currently on:
 - The icon's two bars are that account's 5h and 7d windows, in the panel's colors. They
   dim and get a warning outline when the account is not healthy.
 - The label is the 5h percent and time to reset, then the alias. The alias comes last, so a
-  long one is what gets cut to `…`. Hover for the full reading: both windows, their resets,
-  and any status.
-- Pick another label in **Settings → Plugins → cswap usage**: `42% 2h31m · skt` (default),
-  `42% / 14% · skt` (5h / 7d), or `42% · skt`.
+  long one is what gets cut to `…`. Hover for the full reading, one line each: the account,
+  both windows with their resets, and any status.
 
 Press the pill for a popover with every account on one line and a **Switch** button on each
 inactive one. Switching runs `cswap switch <number>`, which switches the whole machine: every
 running claude agent and terminal on the default login follows it (on macOS within about 30
 seconds, once Claude Code's Keychain cache expires). **Open panel** opens the full table.
+
+The popover's footer also picks the label, previewed with the active account's numbers:
+`42% 2h31m` (default), `42% / 14%` (5h / 7d), or `42%`. The same choice is in
+**Settings → Plugins → cswap usage**.
 
 The pill only appears on agents that use the built-in `claude` provider. Providers that
 extend it and launch `cswap run <alias>` are pinned to their own account, so an

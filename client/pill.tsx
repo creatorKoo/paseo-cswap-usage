@@ -16,7 +16,13 @@ import {
   type UsageListOutput,
   type UsageWindow,
 } from "../shared/contract";
-import { DEFAULT_LABEL_FORMAT, type LabelFormat, pillSettings } from "../shared/settings";
+import {
+  DEFAULT_LABEL_FORMAT,
+  LABEL_EXAMPLES,
+  LABEL_FORMATS,
+  type LabelFormat,
+  pillSettings,
+} from "../shared/settings";
 import {
   accountName,
   barColor,
@@ -38,6 +44,8 @@ type StringTable = {
   switched: (name: string) => string;
   alreadyActive: (name: string) => string;
   note: string;
+  format: string;
+  formatHint: string;
   openPanel: string;
   updated: (time: string) => string;
   loading: string;
@@ -56,7 +64,9 @@ const STRINGS: Record<Locale, StringTable> = {
     switching: "전환 중…",
     switched: (name) => `${name} 계정으로 전환했습니다`,
     alreadyActive: (name) => `이미 ${name} 계정입니다`,
-    note: "전환하면 실행 중인 claude 에이전트와 터미널도 30초쯤 뒤 새 계정을 씁니다",
+    note: "전환하면 실행 중인 claude도 30초쯤 뒤 새 계정을 씁니다",
+    format: "pill",
+    formatHint: "pill 라벨 형식",
     openPanel: "전체 보기",
     updated: (time) => `갱신 ${time}`,
     loading: "불러오는 중…",
@@ -73,7 +83,9 @@ const STRINGS: Record<Locale, StringTable> = {
     switching: "Switching…",
     switched: (name) => `Switched to ${name}`,
     alreadyActive: (name) => `Already on ${name}`,
-    note: "Running claude agents and terminals follow the switch within about 30s",
+    note: "Running claude sessions follow a switch within about 30s",
+    format: "pill",
+    formatHint: "pill label format",
     openPanel: "Open panel",
     updated: (time) => `updated ${time}`,
     loading: "Loading…",
@@ -98,19 +110,22 @@ function activeAccount(data: UsageListOutput | undefined): UsageAccount | null {
   return data?.accounts.find((account) => account.active) ?? null;
 }
 
+/** The numbers part of the label, before the alias. */
+function labelHead(account: UsageAccount, format: LabelFormat): string {
+  const usage = shownUsage(account)?.usage;
+  if (usage === undefined) return "—";
+  const fiveHour = usage.fiveHour;
+  if (format === "5h-7d") return `${percent(fiveHour)} / ${percent(usage.sevenDay)}`;
+  if (format === "short") return percent(fiveHour);
+  return [percent(fiveHour), tightCountdown(fiveHour)].filter(Boolean).join(" ");
+}
+
 /**
  * The one-line label after the gauge icon. The alias goes last so that the host's
  * single-line ellipsis cuts a long alias, never the numbers.
  */
 export function pillLabel(account: UsageAccount, format: LabelFormat): string {
-  const usage = shownUsage(account)?.usage;
-  const fiveHour = usage?.fiveHour;
-  let head: string;
-  if (usage === undefined) head = "—";
-  else if (format === "5h-7d") head = `${percent(fiveHour)} / ${percent(usage.sevenDay)}`;
-  else if (format === "short") head = percent(fiveHour);
-  else head = [percent(fiveHour), tightCountdown(fiveHour)].filter(Boolean).join(" ");
-  return `${head} · ${accountName(account)}`;
+  return `${labelHead(account, format)} · ${accountName(account)}`;
 }
 
 function windowSummary(label: string, usageWindow: UsageWindow | undefined): string | null {
@@ -120,27 +135,33 @@ function windowSummary(label: string, usageWindow: UsageWindow | undefined): str
   return `${label} ${percent(usageWindow)}${reset}`;
 }
 
-/** Tooltip and accessibility label: everything the label had no room for. */
+/**
+ * Tooltip and accessibility label: everything the label had no room for. The host caps
+ * the tooltip at 280px and its Text keeps newlines, so it is one short line per fact.
+ */
 function pillTitle(account: UsageAccount | null, error: string | null): string {
-  const parts = [`cswap: ${account === null ? "—" : accountName(account)}`];
-  if (account !== null) {
-    parts[0] += ` (${strings.active})`;
+  const lines: string[] = [];
+  if (account === null) {
+    lines.push("cswap");
+  } else {
+    lines.push(`${accountName(account)} · ${strings.active}`);
     const shown = shownUsage(account);
     for (const summary of [
       windowSummary("5h", shown?.usage.fiveHour),
       windowSummary("7d", shown?.usage.sevenDay),
     ]) {
-      if (summary !== null) parts.push(summary);
+      if (summary !== null) lines.push(summary);
     }
     if (account.usageStatus !== "ok") {
-      parts.push(account.usageStatus);
-      if (shown?.stale === true) {
-        parts.push(strings.lastGood(clockTime(account.lastGoodFetchedAt ?? null)));
-      }
+      lines.push(
+        shown?.stale === true
+          ? `${account.usageStatus} · ${strings.lastGood(clockTime(account.lastGoodFetchedAt ?? null))}`
+          : account.usageStatus,
+      );
     }
   }
-  if (error !== null) parts.push(error);
-  return parts.join(" · ");
+  if (error !== null) lines.push(error);
+  return lines.join("\n");
 }
 
 function GaugeBar({
@@ -310,6 +331,17 @@ function usePopoverStyles(theme: PluginTheme) {
         borderTopColor: theme.colors.border,
         paddingTop: 8,
       },
+      formats: { flexDirection: "row" as const, alignItems: "center" as const, gap: 6 },
+      chip: {
+        borderRadius: 6,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+      },
+      chipSelected: { borderColor: theme.colors.accent, backgroundColor: theme.colors.surface2 },
+      chipText: { color: theme.colors.foregroundMuted, fontSize: FONT },
+      chipTextSelected: { color: theme.colors.foreground, fontSize: FONT },
     }),
     [theme],
   );
@@ -317,6 +349,7 @@ function usePopoverStyles(theme: PluginTheme) {
 
 type PopoverStyles = ReturnType<typeof usePopoverStyles>;
 
+/** `countdown` null drops the column; an empty string keeps it blank so rows stay aligned. */
 function WindowCell({
   label,
   usageWindow,
@@ -326,7 +359,7 @@ function WindowCell({
 }: {
   label: string;
   usageWindow: UsageWindow | undefined;
-  countdown: boolean;
+  countdown: string | null;
   styles: PopoverStyles;
   theme: PluginTheme;
 }) {
@@ -346,11 +379,11 @@ function WindowCell({
       <Text style={styles.pct} numberOfLines={1}>
         {percent(usageWindow)}
       </Text>
-      {countdown ? (
+      {countdown === null ? null : (
         <Text style={styles.countdown} numberOfLines={1}>
-          {tightCountdown(usageWindow)}
+          {countdown}
         </Text>
-      ) : null}
+      )}
     </View>
   );
 }
@@ -395,17 +428,19 @@ function AccountRow({
         </Text>
       ) : (
         <View style={shown.stale ? [styles.cells, styles.stale] : styles.cells}>
+          {/* A last-good countdown was measured back then and reads as a live one, so a
+              dimmed row leaves it blank. */}
           <WindowCell
             label="5h"
             usageWindow={shown.usage.fiveHour}
-            countdown
+            countdown={shown.stale ? "" : tightCountdown(shown.usage.fiveHour)}
             styles={styles}
             theme={theme}
           />
           <WindowCell
             label="7d"
             usageWindow={shown.usage.sevenDay}
-            countdown={false}
+            countdown={null}
             styles={styles}
             theme={theme}
           />
@@ -441,6 +476,7 @@ export function PillPopover({
 }: PluginButtonContentProps & { onOpenPanel(): void }) {
   const styles = usePopoverStyles(theme);
   const usage = useUsageQuery();
+  const settings = useSettings(pillSettings);
   const queryClient = useQueryClient();
   const callSwitch = useRpc(switchAccount);
   const toast = useToast();
@@ -474,6 +510,11 @@ export function PillPopover({
   const accounts = usage.data?.accounts ?? [];
   const listError = usage.error === null ? (usage.data?.error ?? null) : usage.error.message;
   const pendingNumber = mutation.isPending ? (mutation.variables ?? null) : null;
+  const active = activeAccount(usage.data);
+  // The format picker lives here because Paseo's settings screen has no way back for a
+  // plugin to offer. Loading or invalid settings disable it rather than overwrite them.
+  const ready = settings.status === "ready" ? settings : null;
+  const selectedFormat = ready?.values.labelFormat ?? DEFAULT_LABEL_FORMAT;
 
   return (
     <View style={styles.root}>
@@ -506,7 +547,30 @@ export function PillPopover({
         <Text style={problem.danger ? styles.danger : styles.warning}>{problem.text}</Text>
       )}
       <View style={styles.footer}>
-        <Text style={[styles.muted, { flexShrink: 1 }]}>{strings.note}</Text>
+        <View style={styles.formats}>
+          <Text style={styles.muted}>{strings.format}</Text>
+          {LABEL_FORMATS.map((format) => {
+            const selected = format === selectedFormat;
+            // Previewed with the active account's own numbers when there is one.
+            const preview = active === null ? LABEL_EXAMPLES[format] : labelHead(active, format);
+            return (
+              <Pressable
+                key={format}
+                accessibilityRole="button"
+                accessibilityLabel={`${strings.formatHint}: ${preview}`}
+                accessibilityState={{ selected, disabled: ready === null || ready.saving }}
+                disabled={ready === null || ready.saving}
+                onPress={() => {
+                  if (ready === null || selected) return;
+                  void ready.save({ ...ready.values, labelFormat: format }, ready.revision);
+                }}
+                style={selected ? [styles.chip, styles.chipSelected] : styles.chip}
+              >
+                <Text style={selected ? styles.chipTextSelected : styles.chipText}>{preview}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
         <Pressable
           accessibilityRole="button"
           onPress={() => {
@@ -518,6 +582,8 @@ export function PillPopover({
           <Text style={styles.buttonText}>{strings.openPanel}</Text>
         </Pressable>
       </View>
+      {settings.saveError === null ? null : <Text style={styles.danger}>{settings.saveError}</Text>}
+      <Text style={styles.muted}>{strings.note}</Text>
     </View>
   );
 }

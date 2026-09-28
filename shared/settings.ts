@@ -23,3 +23,10 @@ export const pillSettings = defineSettings({
 });
 
 export const DEFAULT_LABEL_FORMAT: LabelFormat = "5h";
+
+/** What each format looks like, minus the alias. Used where there is no live account. */
+export const LABEL_EXAMPLES: Record<LabelFormat, string> = {
+  "5h": "42% 2h31m",
+  "5h-7d": "42% / 14%",
+  short: "42%",
+};
