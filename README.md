@@ -6,6 +6,11 @@ A [Paseo](https://paseo.sh) workspace panel that shows Claude usage for every
 [claude-swap](https://pypi.org/project/claude-swap/) account on one line each, plus a
 composer pill that shows the active account's usage and switches accounts in two clicks.
 
+<p>
+  <img src="docs/pill-popover.png" width="360" alt="The pill's popover: every account on one line, switch buttons, and the label picker">
+  <img src="docs/pill-tooltip.png" width="170" alt="The pill above the chat input, with its tooltip">
+</p>
+
 ![The panel showing three accounts, one line each](docs/screenshot.png)
 
 ## Why
@@ -88,9 +93,7 @@ state for a while.
 ### Composer pill
 
 Every agent on the built-in `claude` provider gets a pill above its chat input for the
-account claude-swap is currently on:
-
-![The pill and its tooltip](docs/pill-tooltip.png)
+account claude-swap is currently on (screenshots at the top):
 
 - The icon's two bars are that account's 5h and 7d windows, in the panel's colors. They
   dim and get a warning outline when the account is not healthy.
@@ -102,8 +105,6 @@ Press the pill for a popover with every account on one line and a **Switch** but
 inactive one. Switching runs `cswap switch <number>`, which switches the whole machine: every
 running claude agent and terminal on the default login follows it (on macOS within about 30
 seconds, once Claude Code's Keychain cache expires). **Open panel** opens the full table.
-
-![The popover, with switch buttons and the label picker](docs/pill-popover.png)
 
 The popover's footer also picks the label, previewed with the account's own numbers:
 `42% 2h31m` (default), `42% / 14%` (5h / 7d), or `42%`. The same choice is in

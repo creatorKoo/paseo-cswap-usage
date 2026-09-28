@@ -6,6 +6,11 @@
 보여주는 [Paseo](https://paseo.sh) 워크스페이스 패널. 활성 계정의 사용량을 보여주고 두 번
 눌러 계정을 바꾸는 입력창 위 pill도 함께 들어 있다.
 
+<p>
+  <img src="docs/pill-popover.png" width="360" alt="pill 팝오버: 계정마다 한 줄, 전환 버튼, 라벨 형식 선택">
+  <img src="docs/pill-tooltip.png" width="170" alt="입력창 위 pill과 툴팁">
+</p>
+
 ![세 개 계정이 한 줄씩 표시된 패널](docs/screenshot.png)
 
 ## 왜 필요한가
@@ -83,9 +88,7 @@ UI 문구는 시스템 로케일을 따른다(한국어 아니면 영어). 스�
 ### 입력창 위 pill
 
 기본 `claude` 프로바이더로 실행한 에이전트마다, 채팅 입력창 위에 claude-swap이 지금 쓰고
-있는 계정의 pill이 붙는다:
-
-![pill과 툴팁](docs/pill-tooltip.png)
+있는 계정의 pill이 붙는다(스크린샷은 맨 위):
 
 - 아이콘의 막대 두 개는 그 계정의 5h와 7d 창이고, 색은 패널과 같다. 계정 상태가 정상이
   아니면 막대가 흐려지고 warning 색 테두리가 생긴다.
@@ -97,8 +100,6 @@ pill을 누르면 계정마다 한 줄씩 나오는 팝오버가 열리고, 활�
 있다. 전환은 `cswap switch <번호>`를 실행하므로 이 컴퓨터 전체가 바뀐다. 기본 로그인을 쓰는
 실행 중인 claude 에이전트와 터미널이 모두 따라온다(macOS에서는 Claude Code의 Keychain 캐시가
 끝나는 30초쯤 뒤). **전체 보기**를 누르면 전체 표가 있는 패널이 열린다.
-
-![전환 버튼과 라벨 형식 선택이 있는 팝오버](docs/pill-popover.png)
 
 라벨 형식은 팝오버 아래쪽에서 고른다. 버튼에 그 계정의 실제 값이 미리 보인다.
 `42% 2h31m`(기본), `42% / 14%`(5h / 7d), `42%` 중 하나이고, **Settings → Plugins →
