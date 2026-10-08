@@ -53,12 +53,21 @@ export const AccountSchema = z.object({
 });
 
 const ListOutputSchema = z.object({
-  /** Last successful cswap call (ISO). Null until the first success. */
+  /**
+   * Last successful cswap call (ISO), or when Paseo last read the default login. Null until
+   * the first success.
+   */
   fetchedAt: z.string().nullable(),
   /** Message from the most recent failure, or null when the last call succeeded. */
   error: z.string().nullable(),
   activeAccountNumber: z.number().nullable(),
   accounts: z.array(AccountSchema),
+  /**
+   * Null while cswap answers. When cswap is not installed, the path it was looked for at:
+   * `accounts` is then Paseo's own reading of the host's default Claude login, numbered
+   * below zero so that none can pass for a cswap slot.
+   */
+  cswapNotFoundAt: z.string().nullable(),
 });
 
 export const listUsage = defineRpc({

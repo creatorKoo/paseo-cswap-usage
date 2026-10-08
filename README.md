@@ -15,24 +15,31 @@ composer pill that shows the active account's usage and switches accounts in two
 
 ## Why
 
-Paseo's usage panel matches provider IDs exactly, so providers that use
-`extends: "claude"` get no usage row at all. The single built-in `claude` row reads one
-credential file, so it can only ever show whichever account is live right now. If you
-juggle several Claude accounts through claude-swap, there is no way to see them together.
+Paseo reads usage for the login it can see: the host's default one, or the config directory
+a provider declares in its `env`. A provider that launches `cswap run <account>` picks its
+account inside cswap's own process, so Paseo shows the default login's numbers for it, not
+the account the agent runs on. If you juggle several Claude accounts through claude-swap,
+there is no way to see them together.
 
-This panel fills that gap until Paseo inherits usage for extended providers.
+This panel fills that gap.
 
 ## Requirements
 
-- Paseo 0.9.2 or newer
+- Paseo 0.11.0 or newer. v0.4.0 is the last release for Paseo 0.9.2 through 0.10.
 - Plugins enabled on the target daemon (**Settings → Plugins → Enable plugins**)
-- [`claude-swap`](https://pypi.org/project/claude-swap/) installed, with `cswap list --json` working
+- [`claude-swap`](https://pypi.org/project/claude-swap/) installed, with `cswap list --json`
+  working. Without it the plugin shows the host's default Claude login instead; see
+  [Without claude-swap](#without-claude-swap).
 
 ## Install
 
 ```bash
-paseo plugin add creatorKoo/paseo-cswap-usage
+paseo plugin add git:creatorKoo/paseo-cswap-usage
 ```
+
+The `git:` prefix is needed on Paseo 0.11 and later, where a bare `owner/name` is looked up
+in the plugin registry instead of on GitHub. On Paseo 0.9.2 through 0.10, add
+`--ref v0.4.0`.
 
 Or from a local checkout:
 
@@ -125,12 +132,45 @@ and its popover has no switch buttons, because a switch never moves an agent tha
 `cswap run` pinned. The account can be a slot number, an alias, or an email, as `cswap run`
 takes it. A `cswap run` with no account (the directory mapping) gets no pill.
 
+### Without claude-swap
+
+On a host where `cswap` is not installed, the panel and the pill show the host's default
+Claude login instead: the one a plain `claude` runs on. The reading is Paseo's own, the same
+one behind its Usage screen, so the plugin still reads no credentials and sends nothing to
+Anthropic.
+
+```
+Claude  you@example.com [active]   5h    ▮▮▯▯  42% 2h 3m    7d    ▮▯▯▯  14% 3d 9h    Fable ▮▯▯▯  19% 3d 9h
+```
+
+- The row is named after Paseo's own label for the login, with its email when Paseo knows
+  it. Paseo can list more than one Claude login; the first is the default one and gets the
+  `active` badge and the pill.
+- There are no switch buttons, no `est.` projection, and no `$` column. Those need
+  claude-swap.
+- Paseo refreshes its reading about every five minutes, so that is how fresh the numbers
+  are. The footer shows when Paseo last read them.
+- A login Paseo cannot read (an expired token, for example) shows Paseo's status and its
+  reason, such as the command that refreshes it. No last reading is kept for it.
+- A line under the row says where `cswap` was looked for. If it is installed somewhere else,
+  set `CSWAP_BIN` (see [Configuration](#configuration)); a pill pinned by `cswap run` stays
+  empty until then, rather than show the default login's numbers.
+
+The plugin looks for `cswap` again on every poll, so the full table appears within a minute
+of installing it, with no reload.
+
 ## How it works
 
-`cswap list --json` is the only source of usage. The plugin never reads claude-swap's state
-files and never calls the Anthropic API directly. It runs exactly one command that changes
-state — `cswap switch <number> --json` — and only when you press **Switch** in the pill
-popover. It never runs `auto` or a bare `switch`.
+`cswap list --json` is the only source of usage on a host that has claude-swap. The plugin
+never reads claude-swap's state files and never calls the Anthropic API directly. It runs
+exactly one command that changes state — `cswap switch <number> --json` — and only when you
+press **Switch** in the pill popover. It never runs `auto` or a bare `switch`.
+
+Only when `cswap` is not installed (the spawn fails with `ENOENT`) does it ask Paseo for the
+usage Paseo already reads for the default Claude login (`paseo.providers.listUsage()`).
+Paseo fetches and caches that for itself, so the plugin adds no request of its own to the
+usage endpoint. Any other cswap failure is reported as an error, never papered over with the
+default login.
 
 To find pinned providers it reads Paseo's own provider config on the server
 (`paseo.config.get()`). Only each provider's id and its `cswap run` account leave the
@@ -169,6 +209,9 @@ handler runs. Exporting it in your shell does nothing for an already-running dae
 it where the daemon is started (on macOS, `launchctl setenv CSWAP_BIN <path>` before
 relaunching the Paseo app, or in the shell that launches the daemon).
 
+The plugin cannot tell a `cswap` installed somewhere else from one that is not installed.
+In both cases it shows the default login, and the panel says which path it looked at.
+
 ## Uninstall
 
 ```bash
@@ -191,6 +234,7 @@ client/settings.tsx           the pill label setting
 client/common.ts              the usage query the panel and pills share
 client/format.ts              pure labels, tooltips, and lookups (no React), tested
 server/cswap.ts               spawning cswap, caching, parsing, switching
+server/default-login.ts       Paseo's reading of the default login, for hosts without cswap
 server/pinned.ts              finding `cswap run <account>` in provider commands
 shared/contract.ts            the Zod RPC contracts, compiled into both bundles
 shared/settings.ts            the settings documents: pill label, panel text size

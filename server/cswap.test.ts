@@ -1,3 +1,4 @@
+import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 
 // Every spawn is captured here and answered by the test, so no real cswap ever runs.
@@ -16,6 +17,17 @@ vi.mock("node:child_process", () => ({
 type CswapModule = typeof import("./cswap");
 let cswap: CswapModule;
 let log: MockInstance<typeof console.error>;
+
+// What Paseo's own usage call answers. Only a pass that finds no cswap ever reaches it.
+let paseoUsage: () => Promise<unknown>;
+const context = {
+  paseo: { providers: { listUsage: () => paseoUsage() } },
+} as unknown as PluginHandlerContext;
+
+/** `usage.list` the way the daemon calls it. */
+function list() {
+  return cswap.listUsageHandler({}, context);
+}
 
 const EMAIL = "one@example.com";
 
@@ -61,7 +73,7 @@ function fail(index: number, error: object): void {
 
 /** Loads the list once so the cache holds a snapshot with `active` as the active account. */
 async function primeList(active = 4) {
-  const pending = cswap.listUsageHandler();
+  const pending = list();
   answer(spawns.length - 1, listPayload(active));
   return pending;
 }
@@ -71,6 +83,7 @@ beforeEach(async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-09-28T00:00:00Z"));
   log = vi.spyOn(console, "error").mockImplementation(() => {});
+  paseoUsage = () => Promise.reject(new Error("Paseo usage is not part of this test"));
   // Fresh module state (cache, single-flight, last switch) for every test.
   vi.resetModules();
   cswap = await import("./cswap");
@@ -102,16 +115,16 @@ describe("usage.list", () => {
   it("serves the cache for 60 seconds, then spawns again", async () => {
     await primeList();
     vi.advanceTimersByTime(59_000);
-    await cswap.listUsageHandler();
+    await list();
     expect(spawns).toHaveLength(1);
     vi.setSystemTime(Date.now() + 1_001);
-    void cswap.listUsageHandler();
+    void list();
     expect(spawns).toHaveLength(2);
   });
 
   it("shares one spawn between concurrent calls", async () => {
-    const first = cswap.listUsageHandler();
-    const second = cswap.listUsageHandler();
+    const first = list();
+    const second = list();
     expect(spawns).toHaveLength(1);
     answer(0, listPayload(4));
     expect(await first).toEqual(await second);
@@ -120,7 +133,7 @@ describe("usage.list", () => {
   it("keeps the last snapshot when a later call fails", async () => {
     await primeList();
     vi.setSystemTime(Date.now() + 61_000);
-    const pending = cswap.listUsageHandler();
+    const pending = list();
     fail(1, { code: "ENOENT" });
     const result = await pending;
     expect(result.accounts).toHaveLength(2);
@@ -128,7 +141,7 @@ describe("usage.list", () => {
   });
 
   it("drops a malformed account but keeps the rest", async () => {
-    const pending = cswap.listUsageHandler();
+    const pending = list();
     const payload = JSON.parse(listPayload(4));
     payload.accounts.push({ number: "six", email: "three@example.com" });
     answer(0, JSON.stringify(payload));
@@ -138,12 +151,12 @@ describe("usage.list", () => {
   });
 
   it("reports invalid JSON and an unknown schema without quoting them", async () => {
-    let pending = cswap.listUsageHandler();
+    let pending = list();
     answer(0, `{"email": "${EMAIL}"`);
     expect((await pending).error).toBe("cswap returned invalid JSON");
 
     vi.setSystemTime(Date.now() + 61_000);
-    pending = cswap.listUsageHandler();
+    pending = list();
     answer(1, JSON.stringify({ schemaVersion: 2, accounts: [] }));
     expect((await pending).error).toBe("unexpected schemaVersion 2");
   });
@@ -169,7 +182,7 @@ describe("usage.switch", () => {
     expect(result.usage.activeAccountNumber).toBe(5);
     expect(result.usage.accounts.map((account) => account.active)).toEqual([false, true]);
     // The cached list now agrees, still without a second `cswap list`.
-    expect((await cswap.listUsageHandler()).activeAccountNumber).toBe(5);
+    expect((await list()).activeAccountNumber).toBe(5);
     expect(spawns).toHaveLength(2);
   });
 
@@ -212,14 +225,14 @@ describe("usage.switch", () => {
     answer(1, "Switched!");
     expect((await pending).error).toBe("cswap switch returned an unexpected payload");
     // Within the 60 seconds, yet the next list spawns so it can report the real account.
-    void cswap.listUsageHandler();
+    void list();
     expect(spawns).toHaveLength(3);
   });
 
   it("keeps the new active account over a list that started before the switch", async () => {
     await primeList(4);
     vi.setSystemTime(Date.now() + 61_000);
-    const staleList = cswap.listUsageHandler();
+    const staleList = list();
     vi.setSystemTime(Date.now() + 1);
     const pending = cswap.switchAccountHandler({ number: 5 });
     answer(2, switchPayload(4, 5));
@@ -227,5 +240,124 @@ describe("usage.switch", () => {
     // The list that was already running read cswap before the switch landed.
     answer(1, listPayload(4));
     expect((await staleList).activeAccountNumber).toBe(5);
+  });
+});
+
+describe("without cswap", () => {
+  // The clock is fixed at 2026-09-28T00:00:00Z.
+  const PASEO_FETCHED_AT = "2026-09-27T23:58:00.000Z";
+
+  function paseoPayload(status: "available" | "unavailable" = "available") {
+    const available = status === "available";
+    return {
+      fetchedAt: PASEO_FETCHED_AT,
+      providers: [
+        { providerId: "codex", displayName: "Codex", status: "available", windows: [] },
+        {
+          providerId: "claude",
+          displayName: `Claude (${EMAIL})`,
+          status,
+          planLabel: available ? "Max 20x" : null,
+          windows: available
+            ? [
+                { id: "five_hour", label: "Session", usedPct: 42, resetsAt: "2026-09-28T02:03:30Z" },
+                { id: "weekly", label: "Weekly", usedPct: 14, resetsAt: "2026-10-01T09:00:00Z" },
+                { id: "weekly_model_fable", label: "Weekly · Fable", usedPct: 19, resetsAt: null },
+              ]
+            : [],
+          error: available ? null : "Login expired 3h ago. Run claude to refresh it.",
+        },
+      ],
+    };
+  }
+
+  /** One list pass on a host where the cswap binary does not exist. */
+  async function listWithoutCswap() {
+    const pending = list();
+    fail(spawns.length - 1, { code: "ENOENT" });
+    return pending;
+  }
+
+  it("shows the default login as Paseo reads it", async () => {
+    paseoUsage = async () => paseoPayload();
+    const result = await listWithoutCswap();
+    expect(result.error).toBeNull();
+    expect(result.cswapNotFoundAt).toMatch(/cswap$/);
+    expect(result.fetchedAt).toBe(PASEO_FETCHED_AT);
+    expect(result.activeAccountNumber).toBe(-1);
+    expect(result.accounts).toEqual([
+      {
+        number: -1,
+        alias: "Claude",
+        email: EMAIL,
+        active: true,
+        usageStatus: "ok",
+        usage: {
+          fiveHour: { pct: 42, countdown: "2h 3m" },
+          sevenDay: { pct: 14, countdown: "3d 9h" },
+          scoped: [{ pct: 19, name: "Fable" }],
+        },
+      },
+    ]);
+    // Nothing is wrong, so nothing is logged.
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it("asks Paseo once per pass and keeps to the 60 second cache", async () => {
+    const asked = vi.fn(async () => paseoPayload());
+    paseoUsage = asked;
+    await listWithoutCswap();
+    vi.advanceTimersByTime(59_000);
+    await list();
+    expect(spawns).toHaveLength(1);
+    expect(asked).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports cswap as not found when Paseo lists no Claude login", async () => {
+    paseoUsage = async () => ({ fetchedAt: PASEO_FETCHED_AT, providers: [] });
+    const result = await listWithoutCswap();
+    expect(result.accounts).toEqual([]);
+    expect(result.cswapNotFoundAt).toBeNull();
+    expect(result.error).toMatch(/^cswap not found at .* — set CSWAP_BIN/);
+  });
+
+  it("reports cswap as not found when Paseo cannot list usage, logging only the type", async () => {
+    paseoUsage = () => Promise.reject(new TypeError(`no usage for ${EMAIL}`));
+    const result = await listWithoutCswap();
+    expect(result.accounts).toEqual([]);
+    expect(result.error).toMatch(/^cswap not found at /);
+    expect(log).toHaveBeenCalledWith("[cswap-usage] Paseo usage unavailable (TypeError)");
+  });
+
+  it("goes back to the cswap list as soon as cswap answers", async () => {
+    paseoUsage = async () => paseoPayload();
+    await listWithoutCswap();
+    vi.setSystemTime(Date.now() + 61_000);
+    const pending = list();
+    answer(1, listPayload(4));
+    const result = await pending;
+    expect(result.cswapNotFoundAt).toBeNull();
+    expect(result.accounts.map((account) => account.number)).toEqual([4, 5]);
+  });
+
+  it("shows Paseo's status and reason for a login it can no longer read", async () => {
+    paseoUsage = async () => paseoPayload();
+    await listWithoutCswap();
+    vi.setSystemTime(Date.now() + 61_000);
+    paseoUsage = async () => paseoPayload("unavailable");
+    const result = await listWithoutCswap();
+    expect(result.error).toBe("Login expired 3h ago. Run claude to refresh it.");
+    expect(result.accounts).toEqual([
+      { number: -1, alias: "Claude", email: EMAIL, active: true, usageStatus: "unavailable", usage: null },
+    ]);
+  });
+
+  it("never switches on the default login", async () => {
+    paseoUsage = async () => paseoPayload();
+    await listWithoutCswap();
+    const result = await cswap.switchAccountHandler({ number: -1 });
+    expect(result.error).toMatch(/^cswap not found at /);
+    expect(result.switched).toBe(false);
+    expect(spawns).toHaveLength(1);
   });
 });

@@ -10,12 +10,7 @@ import { useToast } from "@getpaseo/plugin/client/react-native";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
-import {
-  switchAccount,
-  type UsageAccount,
-  type UsageListOutput,
-  type UsageWindow,
-} from "../shared/contract";
+import { switchAccount, type UsageAccount, type UsageWindow } from "../shared/contract";
 import {
   DEFAULT_LABEL_FORMAT,
   LABEL_EXAMPLES,
@@ -25,16 +20,15 @@ import {
 import { USAGE_QUERY_KEY, useUsageQuery } from "./common";
 import {
   accountName,
-  activeAccount,
   barColor,
   clockTime,
+  followedAccount,
   labelHead,
   type Locale,
   locale,
   percent,
   pillLabel,
   pillTitle,
-  resolveAccount,
   shownUsage,
   type TitleWords,
   tightCountdown,
@@ -53,6 +47,7 @@ type StringTable = {
   alreadyActive: (name: string) => string;
   note: string;
   pinnedNote: (name: string) => string;
+  defaultNote: string;
   format: string;
   formatHint: string;
   openPanel: string;
@@ -77,6 +72,7 @@ const STRINGS: Record<Locale, StringTable> = {
     alreadyActive: (name) => `이미 ${name} 계정입니다`,
     note: "전환하면 실행 중인 claude도 30초쯤 뒤 새 계정을 씁니다",
     pinnedNote: (name) => `이 에이전트는 cswap run으로 ${name} 계정에 고정돼 있습니다`,
+    defaultNote: "cswap을 찾지 못해 Paseo가 읽은 기본 Claude 로그인을 보여줍니다",
     format: "pill",
     formatHint: "pill 라벨 형식",
     openPanel: "전체 보기",
@@ -99,6 +95,7 @@ const STRINGS: Record<Locale, StringTable> = {
     alreadyActive: (name) => `Already on ${name}`,
     note: "Running claude sessions follow a switch within about 30s",
     pinnedNote: (name) => `This agent is pinned to ${name} by cswap run`,
+    defaultNote: "cswap was not found, so this is the default Claude login as Paseo reads it",
     format: "pill",
     formatHint: "pill label format",
     openPanel: "Open panel",
@@ -117,13 +114,6 @@ const strings = STRINGS[locale];
  * means the built-in provider, which follows whichever account cswap has active.
  */
 type PillTarget = { pinned: string | null };
-
-function followedAccount(
-  data: UsageListOutput | undefined,
-  pinned: string | null,
-): UsageAccount | null {
-  return pinned === null ? activeAccount(data) : resolveAccount(data?.accounts ?? [], pinned);
-}
 
 function titleWords(pinned: string | null): TitleWords {
   return {
@@ -502,8 +492,12 @@ export function PillPopover({
   // plugin to offer. Loading or invalid settings disable it rather than overwrite them.
   const ready = settings.status === "ready" ? settings : null;
   const selectedFormat = ready?.values.labelFormat ?? DEFAULT_LABEL_FORMAT;
-  const note =
-    pinned === null
+  // Without cswap the rows are Paseo's reading of the default login, which nothing here
+  // can switch.
+  const defaultLogin = usage.data?.cswapNotFoundAt != null;
+  const note = defaultLogin
+    ? strings.defaultNote
+    : pinned === null
       ? strings.note
       : strings.pinnedNote(followed === null ? pinned : accountName(followed));
 
@@ -526,7 +520,7 @@ export function PillPopover({
             account={account}
             followed={account.number === followed?.number}
             badge={pinned === null ? strings.active : strings.pinned}
-            canSwitch={pinned === null}
+            canSwitch={pinned === null && !defaultLogin}
             styles={styles}
             theme={theme}
             pendingNumber={pendingNumber}

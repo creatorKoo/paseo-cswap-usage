@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { UsageAccount } from "../shared/contract";
 import {
   activeAccount,
+  followedAccount,
   labelHead,
   pillLabel,
   pillTitle,
@@ -136,9 +137,36 @@ describe("small helpers", () => {
       error: null,
       activeAccountNumber: 5,
       accounts: [account({ active: false }), account({ number: 5, active: true })],
+      cswapNotFoundAt: null,
     };
     expect(activeAccount(list)?.number).toBe(5);
     expect(activeAccount(undefined)).toBeNull();
+  });
+
+  it("follows the active account, or the one a cswap run argument names", () => {
+    const list = {
+      fetchedAt: null,
+      error: null,
+      activeAccountNumber: 4,
+      accounts: [account(), account({ number: 5, alias: "home", active: false })],
+      cswapNotFoundAt: null,
+    };
+    expect(followedAccount(list, null)?.number).toBe(4);
+    expect(followedAccount(list, "home")?.number).toBe(5);
+    expect(followedAccount(undefined, "home")).toBeNull();
+  });
+
+  it("lets no cswap run argument name the default login", () => {
+    const list = {
+      fetchedAt: null,
+      error: null,
+      activeAccountNumber: -1,
+      accounts: [account({ number: -1, alias: "Claude" })],
+      cswapNotFoundAt: "/home/me/.local/bin/cswap",
+    };
+    expect(followedAccount(list, null)?.number).toBe(-1);
+    expect(followedAccount(list, "claude")).toBeNull();
+    expect(followedAccount(list, "one@example.com")).toBeNull();
   });
 
   it("marks the last good fallback as stale", () => {

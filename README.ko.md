@@ -15,24 +15,30 @@
 
 ## 왜 필요한가
 
-Paseo의 사용량 패널은 프로바이더 ID를 정확히 일치시켜 찾는다. 그래서 `extends: "claude"`로
-만든 프로바이더에는 사용량 줄이 아예 뜨지 않는다. 기본으로 들어 있는 `claude` 줄 하나는
-자격 증명 파일을 딱 하나만 읽으니, 지금 켜져 있는 계정밖에 보여주지 못한다. claude-swap으로
-Claude 계정 여러 개를 돌려 쓰고 있다면 이들을 한눈에 볼 방법이 없는 셈이다.
+Paseo는 자기가 볼 수 있는 로그인의 사용량만 읽는다. 호스트의 기본 로그인이거나, 프로바이더가
+`env`에 적어 둔 설정 디렉터리다. `cswap run <계정>`으로 실행하는 프로바이더는 계정을 cswap
+프로세스 안에서 고르기 때문에, Paseo는 그 에이전트가 실제로 쓰는 계정이 아니라 기본 로그인의
+숫자를 보여준다. claude-swap으로 Claude 계정 여러 개를 돌려 쓰고 있다면 이들을 한눈에 볼
+방법이 없는 셈이다.
 
-이 패널은 Paseo가 extends 프로바이더의 사용량까지 물려받을 때까지 그 빈자리를 메운다.
+이 패널이 그 빈자리를 메운다.
 
 ## 요구 사항
 
-- Paseo 0.9.2 이상
+- Paseo 0.11.0 이상. Paseo 0.9.2~0.10에서 쓸 수 있는 마지막 릴리스는 v0.4.0이다.
 - 대상 데몬에서 플러그인 활성화(**Settings → Plugins → Enable plugins**)
-- [`claude-swap`](https://pypi.org/project/claude-swap/) 설치, `cswap list --json` 이 정상 동작
+- [`claude-swap`](https://pypi.org/project/claude-swap/) 설치, `cswap list --json` 이 정상 동작.
+  없으면 호스트의 기본 Claude 로그인을 대신 보여준다.
+  [claude-swap이 없을 때](#claude-swap이-없을-때) 참고.
 
 ## 설치
 
 ```bash
-paseo plugin add creatorKoo/paseo-cswap-usage
+paseo plugin add git:creatorKoo/paseo-cswap-usage
 ```
+
+Paseo 0.11부터는 `owner/name`만 쓰면 GitHub가 아니라 플러그인 레지스트리에서 찾으므로 `git:`
+접두사가 필요하다. Paseo 0.9.2~0.10에서는 뒤에 `--ref v0.4.0`을 붙인다.
 
 로컬 체크아웃에서 설치하려면:
 
@@ -120,11 +126,42 @@ cswap usage** 에서도 같은 걸 고를 수 있다.
 `cswap run`이 받는 그대로 슬롯 번호, 별칭, 이메일 중 무엇이든 된다. 계정 없이 `cswap run`만
 쓰는(디렉터리 매핑) 프로바이더에는 pill이 붙지 않는다.
 
+### claude-swap이 없을 때
+
+`cswap`이 설치되지 않은 호스트에서는 패널과 pill이 호스트의 기본 Claude 로그인, 즉 그냥
+`claude`를 실행했을 때 쓰는 계정을 대신 보여준다. 값은 Paseo가 직접 읽은 것으로 Paseo의
+Usage 화면과 같은 값이다. 그래서 이때도 플러그인은 자격 증명을 읽지 않고 Anthropic에 아무것도
+보내지 않는다.
+
+```
+Claude  you@example.com [active]   5h    ▮▮▯▯  42% 2h 3m    7d    ▮▯▯▯  14% 3d 9h    Fable ▮▯▯▯  19% 3d 9h
+```
+
+- 행 이름은 Paseo가 그 로그인에 붙인 이름이고, Paseo가 이메일을 알면 함께 나온다. Paseo가
+  Claude 로그인을 여러 개 찾을 수도 있는데, 첫 번째가 기본 로그인이라 `active` 배지와 pill은
+  거기에 붙는다.
+- 전환 버튼, `예상` 추정, `$` 열은 없다. 셋 다 claude-swap이 있어야 한다.
+- Paseo가 값을 5분쯤마다 새로 읽으므로 숫자도 그만큼만 최신이다. 푸터에 Paseo가 마지막으로
+  읽은 시각이 나온다.
+- Paseo가 읽지 못한 로그인(토큰 만료 등)에는 Paseo가 준 상태와 이유(예: 갱신하려면 실행할
+  명령)가 나온다. 이 경우 마지막 값은 따로 보관하지 않는다.
+- 행 아래 줄에 `cswap`을 어디서 찾았는지 나온다. 다른 곳에 설치돼 있다면 `CSWAP_BIN`을
+  지정한다([설정](#설정) 참고). 그 전까지 `cswap run`으로 고정된 pill은 기본 로그인의 숫자를
+  보여주는 대신 빈 채로 남는다.
+
+`cswap`은 조회할 때마다 다시 찾으므로, 설치하고 1분 안에 다시 불러오기 없이 전체 표가 나온다.
+
 ## 동작 방식
 
-`cswap list --json`이 유일한 사용량 출처다. claude-swap의 상태 파일을 읽지 않고, Anthropic
-API를 직접 부르지도 않는다. 상태를 바꾸는 명령은 딱 하나, `cswap switch <번호> --json`뿐이고
-pill 팝오버에서 **전환**을 누를 때만 실행한다. `auto`나 번호 없는 `switch`는 실행하지 않는다.
+claude-swap이 있는 호스트에서는 `cswap list --json`이 유일한 사용량 출처다. claude-swap의
+상태 파일을 읽지 않고, Anthropic API를 직접 부르지도 않는다. 상태를 바꾸는 명령은 딱 하나,
+`cswap switch <번호> --json`뿐이고 pill 팝오버에서 **전환**을 누를 때만 실행한다. `auto`나
+번호 없는 `switch`는 실행하지 않는다.
+
+`cswap`이 설치되지 않았을 때만(실행이 `ENOENT`로 실패할 때만) Paseo가 기본 Claude 로그인에
+대해 이미 읽어 둔 사용량을 받아 온다(`paseo.providers.listUsage()`). 그 값은 Paseo가 스스로
+조회하고 캐시하는 것이라, 플러그인 때문에 사용량 엔드포인트 요청이 늘지는 않는다. cswap의 그 밖의
+실패는 오류로 표시할 뿐, 기본 로그인으로 덮지 않는다.
 
 고정 프로바이더를 찾으려고 서버에서 Paseo 자신의 프로바이더 설정(`paseo.config.get()`)을
 읽는다. 서버 밖으로 나가는 건 프로바이더 id와 `cswap run` 계정뿐이고, API 키가 들어 있을 수
@@ -162,6 +199,9 @@ CSWAP_BIN=/opt/homebrew/bin/cswap
 다시 켜기 전에 `launchctl setenv CSWAP_BIN <path>`를 실행하거나, 데몬을 실행하는 셸에
 넣으면 된다.
 
+플러그인은 다른 곳에 설치된 `cswap`과 설치되지 않은 `cswap`을 구별하지 못한다. 두 경우 모두
+기본 로그인을 보여주고, 어느 경로를 찾아봤는지 패널에 표시한다.
+
 ## 삭제
 
 ```bash
@@ -184,6 +224,7 @@ client/settings.tsx           pill 라벨 설정 화면
 client/common.ts              패널과 pill이 같이 쓰는 사용량 조회
 client/format.ts              라벨·툴팁·계정 찾기 같은 순수 함수(React 없음), 테스트 대상
 server/cswap.ts               cswap 실행·캐시·파싱·전환
+server/default-login.ts       cswap이 없는 호스트용, Paseo가 읽은 기본 로그인
 server/pinned.ts              프로바이더 명령에서 `cswap run <계정>` 찾기
 shared/contract.ts            Zod RPC 계약, 양쪽 번들에 모두 들어간다
 shared/settings.ts            설정 문서: pill 라벨, 패널 글자 크기

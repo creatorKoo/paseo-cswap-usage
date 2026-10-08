@@ -1,6 +1,13 @@
 {
   "id": "cswap-usage",
+  "name": "cswap usage",
+  "description": "Claude usage for every claude-swap account, with a composer pill that switches accounts",
+  "media": [
+    "docs/pill-popover.png",
+    "docs/screenshot.png",
+    "docs/pill-tooltip.png"
+  ],
   "requirements": {
-    "paseo": ">=0.9.2"
+    "paseo": ">=0.11.0"
   }
 }

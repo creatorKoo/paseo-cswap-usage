@@ -14,6 +14,8 @@ type StringTable = {
   estimate: (pct: number) => string;
   exhaust: string;
   updated: (time: string) => string;
+  updatedDefault: (time: string) => string;
+  defaultLogin: (path: string) => string;
   refresh: string;
   refreshHint: string;
   refreshLabel: string;
@@ -31,6 +33,9 @@ const STRINGS: Record<Locale, StringTable> = {
     estimate: (pct) => `예상 ${pct}%`,
     exhaust: "소진 예상",
     updated: (time) => `갱신 ${time} · 60초마다`,
+    updatedDefault: (time) => `갱신 ${time} · Paseo 기본 로그인`,
+    defaultLogin: (path) =>
+      `cswap을 ${path} 에서 찾지 못해 Paseo가 읽은 기본 Claude 로그인을 보여줍니다. 다른 곳에 설치했다면 CSWAP_BIN으로 지정하세요.`,
     refresh: "새로고침",
     refreshHint: "60초 이내면 캐시된 값이 옵니다",
     refreshLabel: "cswap 사용량 새로고침",
@@ -46,6 +51,9 @@ const STRINGS: Record<Locale, StringTable> = {
     estimate: (pct) => `est. ${pct}%`,
     exhaust: "will run out",
     updated: (time) => `updated ${time} · every 60s`,
+    updatedDefault: (time) => `updated ${time} · Paseo's default login`,
+    defaultLogin: (path) =>
+      `cswap was not found at ${path}, so this is the default Claude login as Paseo reads it. If cswap is installed elsewhere, set CSWAP_BIN.`,
     refresh: "Refresh",
     refreshHint: "Within 60s you get the cached value",
     refreshLabel: "Refresh cswap usage",
@@ -562,6 +570,9 @@ export function UsagePanel({ theme }: PluginWorkspacePanelProps) {
   const transportError =
     usage.error === null ? null : strings.rpcFailed(usage.error.message);
   const error = transportError ?? usage.data?.error ?? null;
+  // Set when cswap is not installed and the rows are Paseo's reading of the default login.
+  const cswapNotFoundAt = usage.data?.cswapNotFoundAt ?? null;
+  const fetchedAt = clockTime(usage.data?.fetchedAt ?? null);
   const stepIndex = SIZE_STEPS.indexOf(step);
 
   return (
@@ -594,9 +605,18 @@ export function UsagePanel({ theme }: PluginWorkspacePanelProps) {
             </View>
           </ScrollView>
         )}
+        {cswapNotFoundAt === null ? null : (
+          <View style={styles.message}>
+            <Text style={styles.muted}>{strings.defaultLogin(cswapNotFoundAt)}</Text>
+          </View>
+        )}
       </ScrollView>
       <View style={styles.footer}>
-        <Text style={styles.muted}>{strings.updated(clockTime(usage.data?.fetchedAt ?? null))}</Text>
+        <Text style={styles.muted}>
+          {cswapNotFoundAt === null
+            ? strings.updated(fetchedAt)
+            : strings.updatedDefault(fetchedAt)}
+        </Text>
         {accounts.length > 0 && error !== null ? <Text style={styles.danger}>{error}</Text> : null}
         <View style={styles.footerActions}>
           <StepButton

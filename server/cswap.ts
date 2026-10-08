@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { z } from "zod";
 import {
   AccountSchema,
@@ -9,6 +10,7 @@ import {
   type UsageAccount,
   type UsageListOutput,
 } from "../shared/contract";
+import { readDefaultLogin, type UsageLister } from "./default-login";
 
 const execFileAsync = promisify(execFile);
 
@@ -27,6 +29,8 @@ const MAX_BUFFER_BYTES = 4 * 1024 * 1024;
 type UsageSnapshot = {
   activeAccountNumber: number | null;
   accounts: UsageAccount[];
+  /** Null for a cswap list. Set when the accounts are the default login instead. */
+  cswapNotFoundAt: string | null;
 };
 
 // Failures keep the previous snapshot and only set `error`, matching cswap's own
@@ -137,6 +141,7 @@ function parseSnapshot(stdout: string): UsageSnapshot {
   return {
     activeAccountNumber: envelope.data.activeAccountNumber ?? null,
     accounts,
+    cswapNotFoundAt: null,
   };
 }
 
@@ -146,12 +151,14 @@ function currentOutput(): UsageListOutput {
     error: cache.error,
     activeAccountNumber: cache.snapshot?.activeAccountNumber ?? null,
     accounts: cache.snapshot?.accounts ?? [],
+    cswapNotFoundAt: cache.snapshot?.cswapNotFoundAt ?? null,
   };
 }
 
 /** The snapshot with `number` as the only active account. */
 function withActive(snapshot: UsageSnapshot, number: number): UsageSnapshot {
   return {
+    ...snapshot,
     activeAccountNumber: number,
     accounts: snapshot.accounts.map((account) =>
       account.active === (account.number === number)
@@ -161,8 +168,29 @@ function withActive(snapshot: UsageSnapshot, number: number): UsageSnapshot {
   };
 }
 
+/**
+ * cswap is not installed: the cache takes Paseo's reading of the host's default Claude
+ * login in place of a list. False when Paseo has none to give, which leaves the not-found
+ * error to be reported as before.
+ */
+async function cacheDefaultLogin(paseo: UsageLister): Promise<boolean> {
+  const login = await readDefaultLogin(paseo, Date.now());
+  if (login === null) return false;
+  cache = {
+    snapshot: {
+      activeAccountNumber: login.accounts.find((account) => account.active)?.number ?? null,
+      accounts: login.accounts,
+      cswapNotFoundAt: CSWAP_BIN,
+    },
+    fetchedAt: login.fetchedAt,
+    error: login.error,
+    at: Date.now(),
+  };
+  return true;
+}
+
 /** Never rejects: single-flight callers all share one settled result. */
-async function runCswap(): Promise<UsageListOutput> {
+async function runCswap(paseo: UsageLister): Promise<UsageListOutput> {
   const startedAt = Date.now();
   let snapshot: UsageSnapshot;
   try {
@@ -178,6 +206,10 @@ async function runCswap(): Promise<UsageListOutput> {
       snapshot = withActive(snapshot, lastSwitch.number);
     }
   } catch (error) {
+    // A missing cswap is not a failure when the default login can stand in for its list.
+    // It is tried again on every pass, so installing cswap needs no reload.
+    const notFound = (error as { code?: unknown } | null)?.code === "ENOENT";
+    if (notFound && (await cacheDefaultLogin(paseo))) return currentOutput();
     const message =
       error instanceof CswapPayloadError ? error.message : describeExecError(error);
     cache = { ...cache, error: message, at: Date.now() };
@@ -193,13 +225,16 @@ async function runCswap(): Promise<UsageListOutput> {
   return currentOutput();
 }
 
-export function listUsageHandler(): Promise<UsageListOutput> {
+export function listUsageHandler(
+  _input: unknown,
+  { paseo }: PluginHandlerContext,
+): Promise<UsageListOutput> {
   // `at` starts at 0, so the first call always misses.
   if (Date.now() - cache.at < CACHE_TTL_MS) {
     return Promise.resolve(currentOutput());
   }
   if (inflight !== null) return inflight;
-  const pending = runCswap().finally(() => {
+  const pending = runCswap(paseo).finally(() => {
     if (inflight === pending) inflight = null;
   });
   inflight = pending;
@@ -290,6 +325,12 @@ export function switchAccountHandler({ number }: { number: number }): Promise<Sw
   // cswap itself reported.
   if (cache.snapshot === null) {
     return Promise.resolve(switchFailure("no cswap list yet — try again after it loads"));
+  }
+  // The default login shown without cswap is no cswap list, and its numbers are no slots.
+  if (cache.snapshot.cswapNotFoundAt !== null) {
+    return Promise.resolve(
+      switchFailure(`cswap not found at ${cache.snapshot.cswapNotFoundAt}`),
+    );
   }
   if (!cache.snapshot.accounts.some((account) => account.number === number)) {
     return Promise.resolve(switchFailure(`account ${number} is not in the cswap list`));

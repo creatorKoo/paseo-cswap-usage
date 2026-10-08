@@ -79,6 +79,21 @@ export function resolveAccount(
   );
 }
 
+/**
+ * The account a pill follows: the active one, or the one its provider's `cswap run`
+ * argument names when `pinned` is not null.
+ */
+export function followedAccount(
+  data: UsageListOutput | undefined,
+  pinned: string | null,
+): UsageAccount | null {
+  if (pinned === null) return activeAccount(data);
+  // Without a cswap list there is nothing a `cswap run` argument could name. The default
+  // login must not answer to one, or a pinned pill would show another account's numbers.
+  if (data?.cswapNotFoundAt != null) return null;
+  return resolveAccount(data?.accounts ?? [], pinned);
+}
+
 export function percent(usageWindow: UsageWindow | undefined): string {
   return usageWindow === undefined ? "—" : `${Math.round(usageWindow.pct)}%`;
 }
