@@ -1,6 +1,6 @@
 {
   "name": "cswap-usage",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "description": "Paseo panel and composer pill showing usage for every claude-swap account",
   "license": "MIT",
