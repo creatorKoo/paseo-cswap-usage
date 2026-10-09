@@ -34,12 +34,13 @@ This panel fills that gap.
 ## Install
 
 ```bash
-paseo plugin add git:creatorKoo/paseo-cswap-usage
+paseo plugin add creatorkoo/cswap-usage
 ```
 
-The `git:` prefix is needed on Paseo 0.11 and later, where a bare `owner/name` is looked up
-in the plugin registry instead of on GitHub. On Paseo 0.9.2 through 0.10, add
-`--ref v0.4.0`.
+That installs the reviewed release from the
+[Paseo plugin registry](https://paseo.sh/plugins/creatorkoo/cswap-usage). To install straight
+from GitHub instead, use `paseo plugin add git:creatorKoo/paseo-cswap-usage`; on Paseo 0.9.2
+through 0.10, add `--ref v0.4.0` to that command.
 
 Or from a local checkout:
 

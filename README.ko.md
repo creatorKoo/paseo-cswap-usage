@@ -34,11 +34,13 @@ Paseo는 자기가 볼 수 있는 로그인의 사용량만 읽는다. 호스트
 ## 설치
 
 ```bash
-paseo plugin add git:creatorKoo/paseo-cswap-usage
+paseo plugin add creatorkoo/cswap-usage
 ```
 
-Paseo 0.11부터는 `owner/name`만 쓰면 GitHub가 아니라 플러그인 레지스트리에서 찾으므로 `git:`
-접두사가 필요하다. Paseo 0.9.2~0.10에서는 뒤에 `--ref v0.4.0`을 붙인다.
+[Paseo 플러그인 레지스트리](https://paseo.sh/plugins/creatorkoo/cswap-usage)에 올라간, 심사를
+거친 릴리스가 설치된다. GitHub에서 바로 받으려면
+`paseo plugin add git:creatorKoo/paseo-cswap-usage`를 쓰고, Paseo 0.9.2~0.10에서는 그 명령
+뒤에 `--ref v0.4.0`을 붙인다.
 
 로컬 체크아웃에서 설치하려면:
 
