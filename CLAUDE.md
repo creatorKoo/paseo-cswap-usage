@@ -29,9 +29,9 @@ without cswap it shows the default Claude login as Paseo reads it.
   — it kills running agents.
 - Do not enable the global `pluginsEnabled` switch without the user's explicit permission.
   Plugins are trusted, unsandboxed code.
-- Never log the `cswap` subprocess stdout, for `list` or `switch`, nor Paseo's usage rows.
-  They carry emails and organization names; log only error types and messages built from
-  our own text.
+- Never log what the `cswap` subprocess prints, stdout or stderr, for `list` or `switch`,
+  nor Paseo's usage rows. They carry emails and organization names; log only error types
+  and messages built from our own text. cswap's own message may go to the client.
 - Typecheck (`npm run typecheck`) and test (`npm test`) before every reload or install.
   Tests must never spawn a real `cswap`; mock `node:child_process` as `server/cswap.test.ts`
   does.

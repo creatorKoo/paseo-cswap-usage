@@ -188,7 +188,9 @@ The server-side handler, which runs in the plugin subprocess the daemon starts:
   time, and then marks the new active account in its cache rather than spawning another
   `cswap list`. The panel, every pill, and every popover share one query, so they add no
   polling of their own.
-- never logs the stdout of either command, which carries emails and organization names.
+- never logs what either command prints, stdout or stderr, which can carry emails and
+  organization names. A failure shows cswap's own message in the panel and logs only our
+  description of it.
 
 Fields the panel does not render (`organizationName`, `organizationUuid`,
 `projectedExhaustionAt`, …) are dropped by the Zod schema on the server side, so they never

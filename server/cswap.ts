@@ -59,13 +59,13 @@ function firstLine(text: string): string {
   return line === undefined ? "" : line.trim().slice(0, 200);
 }
 
+/** A failed spawn in our own words only, so the result is safe to log. */
 function describeExecError(error: unknown): string {
   if (!(error instanceof Error)) return "cswap failed: unknown error";
   const details = error as Error & {
     code?: string | number;
     killed?: boolean;
     signal?: NodeJS.Signals | null;
-    stderr?: string;
   };
   // `killed` alone is ambiguous: execFile also sets it when it tears the child down for
   // exceeding maxBuffer, which is not a timeout.
@@ -84,11 +84,20 @@ function describeExecError(error: unknown): string {
   if (typeof details.code === "string") {
     return `cswap could not run at ${CSWAP_BIN} (${details.code})`;
   }
-  const stderrLine = typeof details.stderr === "string" ? firstLine(details.stderr) : "";
-  if (typeof details.code === "number") {
-    return `cswap exited ${details.code}${stderrLine === "" ? "" : `: ${stderrLine}`}`;
-  }
+  if (typeof details.code === "number") return `cswap exited ${details.code}`;
   return `cswap failed: ${firstLine(error.message)}`;
+}
+
+/**
+ * `message` followed by the first line cswap wrote to stderr, when it exited with one. That
+ * line is cswap's own text and can name an email, so this form is for the client and never
+ * for the logs.
+ */
+function withStderr(message: string, error: unknown): string {
+  const details = error as { code?: unknown; stderr?: unknown } | null;
+  if (typeof details?.code !== "number" || typeof details.stderr !== "string") return message;
+  const line = firstLine(details.stderr);
+  return line === "" ? message : `${message}: ${line}`;
 }
 
 /** Path + code only. Never the offending value, which carries emails and org names. */
@@ -212,7 +221,7 @@ async function runCswap(paseo: UsageLister): Promise<UsageListOutput> {
     if (notFound && (await cacheDefaultLogin(paseo))) return currentOutput();
     const message =
       error instanceof CswapPayloadError ? error.message : describeExecError(error);
-    cache = { ...cache, error: message, at: Date.now() };
+    cache = { ...cache, error: withStderr(message, error), at: Date.now() };
     console.error(`[cswap-usage] ${message}`);
     return currentOutput();
   }
@@ -286,7 +295,7 @@ async function runSwitch(number: number): Promise<SwitchOutput> {
     }
     const message = describeExecError(error);
     console.error(`[cswap-usage] ${message}`);
-    return switchFailure(message);
+    return switchFailure(withStderr(message, error));
   }
 
   let result: z.output<typeof SwitchResultSchema> | null = null;

@@ -150,6 +150,15 @@ describe("usage.list", () => {
     expect(log).toHaveBeenCalledWith(expect.stringMatching(/skipped cswap account 2\.number/));
   });
 
+  it("shows the line cswap wrote to stderr but keeps it out of the logs", async () => {
+    const pending = list();
+    fail(0, { code: 2, stderr: `
+Error: cannot refresh ${EMAIL}
+  at refresh()` });
+    expect((await pending).error).toBe(`cswap exited 2: Error: cannot refresh ${EMAIL}`);
+    expect(log).toHaveBeenCalledWith("[cswap-usage] cswap exited 2");
+  });
+
   it("reports invalid JSON and an unknown schema without quoting them", async () => {
     let pending = list();
     answer(0, `{"email": "${EMAIL}"`);
@@ -217,6 +226,14 @@ describe("usage.switch", () => {
     expect(result.error).toBe(`No account for ${EMAIL}`);
     expect(result.usage.activeAccountNumber).toBe(4);
     expect(log).toHaveBeenCalledWith("[cswap-usage] cswap switch failed (AccountNotFoundError)");
+  });
+
+  it("keeps stderr out of the logs when a switch exits without an error envelope", async () => {
+    await primeList(4);
+    const pending = cswap.switchAccountHandler({ number: 5 });
+    fail(1, { code: 1, stderr: `No account for ${EMAIL}` });
+    expect((await pending).error).toBe(`cswap exited 1: No account for ${EMAIL}`);
+    expect(log).toHaveBeenCalledWith("[cswap-usage] cswap exited 1");
   });
 
   it("expires the cache when a switch answers with something unexpected", async () => {
